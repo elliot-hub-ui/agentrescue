@@ -77,6 +77,30 @@ class PaidTrialConfigTests(unittest.TestCase):
                 self.assertEqual(discovery["supportedVersions"], ["2025-11-25", "2025-06-18", "2025-03-26"])
                 self.assertIn("paid trial is currently disabled", discovery["instructions"])
 
+                unsupported = client.post("/mcp", headers={
+                    **headers,
+                    "MCP-Protocol-Version": "2026-07-28",
+                    "Mcp-Method": "server/discover",
+                }, json={
+                    "jsonrpc": "2.0",
+                    "id": "discover-unsupported",
+                    "method": "server/discover",
+                    "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2025-11-25"}},
+                })
+                self.assertEqual(unsupported.status_code, 400, unsupported.text)
+                self.assertEqual(unsupported.json()["error"]["code"], -32022)
+
+                invalid_host = client.post("/mcp", headers={
+                    **discovery_headers,
+                    "Host": "attacker.example",
+                }, json={
+                    "jsonrpc": "2.0",
+                    "id": "discover-invalid-host",
+                    "method": "server/discover",
+                    "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}},
+                })
+                self.assertEqual(invalid_host.status_code, 421)
+
                 initialized = client.post("/mcp", headers=headers, json={
                     "jsonrpc": "2.0",
                     "id": 1,
