@@ -27,8 +27,46 @@ class PaidTrialConfigTests(unittest.TestCase):
             "AGENTRESCUE_X402_ENABLED": "true",
             "AGENTRESCUE_X402_NETWORK": MAINNET,
             "AGENTRESCUE_X402_PAY_TO": "0x1111111111111111111111111111111111111111",
+            "AGENTRESCUE_X402_PRODUCTION_APPROVED": "1",
+            "AGENTRESCUE_X402_FACILITATOR": "https://facilitator.example.test",
         }
         self.assertEqual(payment_settings(env)["mode"], "mainnet")
+
+    def test_mainnet_requires_explicit_approval_and_facilitator(self):
+        env = {
+            "AGENTRESCUE_X402_ENABLED": "1",
+            "AGENTRESCUE_X402_NETWORK": MAINNET,
+            "AGENTRESCUE_X402_PAY_TO": "0x1111111111111111111111111111111111111111",
+            "AGENTRESCUE_X402_FACILITATOR": "https://facilitator.example.test",
+        }
+        with self.assertRaisesRegex(RuntimeError, "PRODUCTION_APPROVED"):
+            payment_settings(env)
+        approved = {**env, "AGENTRESCUE_X402_PRODUCTION_APPROVED": "1"}
+        with self.assertRaisesRegex(RuntimeError, "explicitly selected facilitator"):
+            payment_settings({**approved, "AGENTRESCUE_X402_FACILITATOR": ""})
+
+    def test_mainnet_rejects_test_facilitator_and_embedded_credentials(self):
+        env = {
+            "AGENTRESCUE_X402_ENABLED": "1",
+            "AGENTRESCUE_X402_NETWORK": MAINNET,
+            "AGENTRESCUE_X402_PAY_TO": "0x1111111111111111111111111111111111111111",
+            "AGENTRESCUE_X402_PRODUCTION_APPROVED": "1",
+            "AGENTRESCUE_X402_FACILITATOR": "https://x402.org/facilitator",
+        }
+        with self.assertRaisesRegex(RuntimeError, "reserved here for testnet"):
+            payment_settings(env)
+        with self.assertRaisesRegex(RuntimeError, "without embedded credentials"):
+            payment_settings({
+                **env,
+                "AGENTRESCUE_X402_FACILITATOR": "https://user:secret@facilitator.example.test",
+            })
+        self.assertEqual(
+            payment_settings({
+                **env,
+                "AGENTRESCUE_X402_FACILITATOR": "https://facilitator.example.test",
+            })["facilitator_url"],
+            "https://facilitator.example.test",
+        )
 
     def test_enabled_mode_fails_closed_without_network_or_payee(self):
         with self.assertRaises(RuntimeError):

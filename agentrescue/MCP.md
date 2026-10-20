@@ -10,7 +10,7 @@ When called directly by an agent, send only the smallest relevant error excerpt 
 
 ## Discovery and payment
 
-Discovery and tool listing are free. The hosted x402 implementation supports a fixed $0.01 USDC payment per successful diagnosis. It remains disabled until the owner provides a receiving address and reviews the final production configuration. The build does not create or control a wallet, and no production payment is enabled by default.
+Discovery and tool listing are free. The hosted x402 implementation supports a fixed $0.01 USDC payment per successful diagnosis. It remains disabled until the owner provides a receiving address, selects an HTTPS production facilitator, explicitly approves mainnet, and reviews the final production configuration. Base mainnet rejects the public x402.org facilitator; testnet alone uses it by default. The build does not create or control a wallet, and no production payment is enabled by default.
 
 Each process allows at most 60 GET and 20 POST requests per rolling minute, with 16 KB request and response caps. The low-volume limits reset on restart and are not DDoS protection. Feedback writes remain disabled. Send only synthetic or sanitized input; redaction is best-effort.
 
