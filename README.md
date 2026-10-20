@@ -1,25 +1,21 @@
 # AgentRescue
 
-AgentRescue is an MCP-callable HTTP/API/MCP failure diagnosis tool for AI agents. Agents can call `diagnose_failure` for structured recovery guidance. It never executes fixes.
+AgentRescue is an MCP tool for AI agents diagnosing HTTP, API, and MCP failures. It returns bounded, read-only recovery guidance; it never executes fixes.
 
 ## Connect
 
-Connect an MCP client to `https://agentrescue-mcp.onrender.com/mcp` using Streamable HTTP. Discovery and tool listing are free. The paid-trial implementation charges exactly $0.01 USDC per successful diagnosis through x402 when explicitly enabled; payment collection is disabled by default and requires an owner-supplied receiving address and final review.
+MCP endpoint: `https://agentrescue-mcp.onrender.com/mcp` using Streamable HTTP.
 
-Send only synthetic or sanitized excerpts. Secret redaction is best-effort. Traffic is capped at 60 GET and 20 POST requests per minute per instance, with 16 KB request/response limits. The app does not persist credentials or request bodies.
+Discovery and tool listing are free. The **live Render service currently runs the no-charge prototype**. The paid-trial implementation is published and passes CI, but is not yet live. Its Render blueprint selects `agentrescue/paid_trial_app.py` and keeps `AGENTRESCUE_X402_ENABLED=0`; the existing service has manual settings that still start `agentrescue/app.py`.
 
-## Local development
+The proposed paid trial costs exactly **$0.01 USDC per successful diagnosis** through x402. Payments remain disabled until the owner supplies a receiving address and reviews the live production configuration. No production revenue is currently collected.
 
-Python 3.12+:
+Send only synthetic or sanitized error excerpts. Secret redaction is best-effort. Requests are limited to 60 GET and 20 POST per minute per instance, with 16 KB request and response caps. The service does not intentionally persist diagnostic requests.
 
-```sh
-cd agentrescue
-python3 app.py
-python3 -m unittest -v
-```
+## Bandwidth and unit economics
 
-The hosted MCP entry point is `paid_trial_app.py`. Render deployment is defined in `render.yaml`; it pins dependencies, runs the test suite, uses the existing 0.5 CPU / 512 MB service plan, and leaves x402 payments disabled.
+At a maximum 16 KB response, marginal public egress at Render's documented $0.15/GB rate is at most **$0.0000024 per response**. Against a $0.01 paid diagnosis, gross call revenue is about **4,166× the maximum response-bandwidth cost**. This excludes fixed compute, payment/facilitator fees, support, acquisition, taxes, and maintenance, so it does not prove profitability.
 
-## Economics and product status
+The Render service uses one 0.5 CPU / 512 MB instance at about $7/month compute. It therefore needs roughly **700 successful paid calls just to cover compute**, before other costs. The 5 GB Hobby bandwidth allowance is shared across workspace services; review actual workspace billing and keep total spend under the approved $40 ceiling. A single Render metrics sample on 2026-10-20 was 0.0087 MB; no production payments or customer use have been observed.
 
-At $0.01 per diagnosis and the largest measured response, estimated marginal bandwidth is several thousand times lower than the call price. That is gross contribution before fixed hosting, facilitator/payment fees, refunds, taxes, and support. It does not prove profitability. Agent demand, task lift, and repeat use remain unvalidated; see `venture/` for the synthetic benchmark and pilot plan.
+See `venture/economics.md` and `venture/acceptance.md` for assumptions, limits, and current validation status.
