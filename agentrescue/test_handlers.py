@@ -2,7 +2,7 @@ import io, json, unittest
 from unittest import mock
 from email.message import Message
 import app
-from app import H
+from app import H, MAX_RESPONSE_BYTES
 class Capture(H):
  def __init__(self, path, payload):
   self.path=path; self.headers=Message(); raw=json.dumps(payload).encode(); self.headers['Content-Length']=str(len(raw)); self.rfile=io.BytesIO(raw); self.response=None
@@ -12,9 +12,15 @@ class RawCapture(Capture):
   self.path=path;self.headers=Message()
   for key,value in (headers or {}).items():self.headers[key]=value
   self.rfile=io.BytesIO(body);self.response=None
+class WireCapture(H):
+ def __init__(self):self.wfile=io.BytesIO();self.out_headers={}
+ def send_response(self,status):self.out_status=status
+ def send_header(self,key,value):self.out_headers[key]=value
+ def end_headers(self):pass
 class HandlerTests(unittest.TestCase):
  def setUp(self):
   with app._rate_limit_lock:app._recent_posts.clear()
+  with app._get_lock:app._recent_gets.clear()
  def test_llms_txt_explains_agent_safety_and_payment(self):
   h=Capture('/llms.txt',{});h.do_GET()
   self.assertEqual(h.response[0],200);self.assertIn('LLM',h.response[1].decode());self.assertIn('no-charge',h.response[1].decode())
@@ -93,4 +99,14 @@ class HandlerTests(unittest.TestCase):
   h=Capture('/v1/diagnose',{'error':'HTTP 429'})
   with mock.patch('app.allow_post',return_value=False):h.do_POST()
   self.assertEqual(h.response[0],429);self.assertEqual(h.response[1]['retry_after_seconds'],60)
+ def test_get_rate_limit_returns_retry_after(self):
+  h=Capture('/health',{})
+  with mock.patch('app.allow_get',return_value=False):h.do_GET()
+  self.assertEqual(h.response[0],429);self.assertEqual(h.response[1]['retry_after_seconds'],60)
+ def test_outbound_response_has_a_hard_byte_ceiling(self):
+  h=WireCapture();h.send(200,{'jsonrpc':'2.0','id':7,'result':{'oversized':'x'*MAX_RESPONSE_BYTES}})
+  body=h.wfile.getvalue()
+  self.assertLessEqual(len(body),MAX_RESPONSE_BYTES)
+  self.assertEqual(json.loads(body)['error']['code'],-32603)
+  self.assertEqual(int(h.out_headers['Content-Length']),len(body))
 if __name__=='__main__':unittest.main()
