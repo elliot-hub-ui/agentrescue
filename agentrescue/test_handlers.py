@@ -30,6 +30,15 @@ class HandlerTests(unittest.TestCase):
  def test_diagnosis_endpoint_response(self):
   h=Capture('/v1/diagnose',{'error':'MCP initialize invalid protocol version','system':'mcp'});h.do_POST()
   self.assertEqual(h.response[0],200); self.assertEqual(h.response[1]['category'],'mcp_protocol')
+ def test_http_diagnosis_response_does_not_echo_input(self):
+  marker='customer-run-id-8395 /internal/customer/acme'
+  h=Capture('/v1/diagnose',{'error':'Unexpected upstream failure: '+marker});h.do_POST()
+  self.assertEqual(h.response[0],200);self.assertNotIn(marker,json.dumps(h.response[1]))
+ def test_mcp_diagnosis_response_does_not_echo_input(self):
+  marker='customer-run-id-8395 /internal/customer/acme'
+  h=Capture('/mcp',{'jsonrpc':'2.0','id':8,'method':'tools/call','params':{'name':'diagnose_failure','arguments':{'error':'Unexpected upstream failure: '+marker,'system':'mcp'},'_meta':{'io.modelcontextprotocol/protocolVersion':'2026-07-28'}}})
+  h.headers['MCP-Protocol-Version']='2026-07-28';h.headers['Mcp-Method']='tools/call';h.headers['Mcp-Name']='diagnose_failure';h.do_POST()
+  self.assertEqual(h.response[0],200);self.assertNotIn(marker,json.dumps(h.response[1]))
  def test_http_rejects_missing_and_invalid_lengths(self):
   missing=RawCapture('/v1/diagnose');missing.do_POST();self.assertEqual(missing.response[0],411)
   invalid=RawCapture('/v1/diagnose',headers={'Content-Length':'-1'});invalid.do_POST();self.assertEqual(invalid.response[0],400)
