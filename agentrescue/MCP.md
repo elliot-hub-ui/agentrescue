@@ -1,0 +1,5 @@
+# MCP connection
+
+AgentRescue supports MCP `2026-07-28` stateless HTTP at `POST /mcp`, including `server/discover`, `tools/list`, and `tools/call`; it also accepts the legacy initialize handshake through `2025-11-25`. The modern path requires matching `MCP-Protocol-Version` and `Mcp-Method` headers, plus matching `Mcp-Name` on `tools/call`. The local server binds to `127.0.0.1` by default. The official Python MCP and x402 SDKs completed one Base Sepolia test payment through Streamable HTTP; the testnet transaction and limits are documented in `../venture/technical-readiness.md`. This verifies that one path, not broad client compatibility.
+
+The tool `diagnose_failure` accepts `error` (up to 8,000 characters) and optional `system` (`http`, `api`, or `mcp`). Its response includes category, qualitative confidence and its basis, evidence, and recovery safety fields. It does not execute remediation. The free prototype remains test/no-charge mode; the separate x402 test harness is fixed to one $0.01 testnet transaction and must not be treated as production billing.
