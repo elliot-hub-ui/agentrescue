@@ -61,6 +61,22 @@ class PaidTrialConfigTests(unittest.TestCase):
         headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
         with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
             with TestClient(app, base_url="http://agentrescue-mcp.onrender.com") as client:
+                discovery_headers = {
+                    **headers,
+                    "MCP-Protocol-Version": "2026-07-28",
+                    "Mcp-Method": "server/discover",
+                }
+                discovered = client.post("/mcp", headers=discovery_headers, json={
+                    "jsonrpc": "2.0",
+                    "id": "discover-1",
+                    "method": "server/discover",
+                    "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}},
+                })
+                self.assertEqual(discovered.status_code, 200, discovered.text)
+                discovery = discovered.json()["result"]
+                self.assertEqual(discovery["supportedVersions"], ["2025-11-25", "2025-06-18", "2025-03-26"])
+                self.assertIn("paid trial is currently disabled", discovery["instructions"])
+
                 initialized = client.post("/mcp", headers=headers, json={
                     "jsonrpc": "2.0",
                     "id": 1,
