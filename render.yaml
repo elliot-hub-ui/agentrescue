@@ -2,12 +2,14 @@ services:
   - type: web
     name: agentrescue-mcp
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     rootDir: agentrescue
-    buildCommand: python -m compileall -q .
-    startCommand: python app.py
+    buildCommand: python -m pip install -r requirements.txt -r requirements.lock && python -m compileall -q . && python -m unittest -v
+    startCommand: python -m uvicorn paid_trial_app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    autoDeployTrigger: commit
+    autoDeployTrigger: off
     envVars:
       - key: HOST
         value: 0.0.0.0
+      - key: AGENTRESCUE_X402_ENABLED
+        value: "0"
