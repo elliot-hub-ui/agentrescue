@@ -103,6 +103,32 @@ def payment_resource_config(settings: dict[str, str]):
     )
 
 
+def payment_discovery_extension():
+    """Describe the paid MCP tool for facilitators that support Bazaar discovery."""
+    from x402.extensions.bazaar import (
+        DeclareMcpDiscoveryConfig,
+        declare_mcp_discovery_extension,
+    )
+
+    return declare_mcp_discovery_extension(
+        DeclareMcpDiscoveryConfig(
+            tool_name="diagnose_failure",
+            description="Diagnose a sanitized HTTP, API, or MCP error with read-only recovery guidance.",
+            transport="streamable-http",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string", "minLength": 1, "maxLength": MAX_DIAGNOSIS_CHARS},
+                    "system": {"type": "string", "enum": ["http", "api", "mcp"]},
+                },
+                "required": ["error"],
+                "additionalProperties": False,
+            },
+            example={"error": "HTTP 429 rate limit", "system": "http"},
+        )
+    )
+
+
 def _allow(method: str) -> bool:
     now = time.monotonic()
     queue = _gets if method == "GET" else _posts
@@ -366,6 +392,7 @@ async def _configure_tool() -> None:
                     description="Bounded HTTP, API, and MCP error diagnosis",
                     mime_type="application/json",
                 ),
+                extensions=payment_discovery_extension(),
             )
 
         description = "Diagnose a sanitized HTTP/API/MCP error."
