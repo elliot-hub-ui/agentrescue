@@ -18,8 +18,12 @@ The hosted free demo is no-charge and applies a shared limit of 20 POST requests
 
 Run the test suite with `python3 -m unittest`. To run all test and x402 adapter checks, install pinned dependencies: `python3 -m venv .venv`, `.venv/bin/pip install -r requirements.txt`, then `.venv/bin/pip install -r requirements.lock`. The main prototype itself uses only the Python standard library.
 
-## Experimental x402 testnet code
+## Paid-trial controls
 
-`x402_mcp_server.py` and `x402_mcp_test_once.py` are separate, opt-in Base Sepolia testnet experiments. They are not launched by the free service, have no mainnet mode, and do not constitute production billing. The test client uses a one-attempt sentinel. Do not clear it or make a testnet payment without separate explicit authorization. Never place private keys or credentials in this repository.
+`paid_trial_app.py` is the hosted MCP entry point. Its x402 payment code is disabled by default, so no diagnosis charge is collected until the owner explicitly enables it. The fixed price is $0.01 USDC per successful diagnosis. Test mode accepts Base Sepolia only; production mode accepts Base mainnet only. Both require an explicit non-zero receiving address, and invalid or incomplete settings stop service startup. The facilitator is fixed to `https://x402.org/facilitator`.
+
+The production payment switch must remain off until the owner supplies the receiving address and reviews the final live configuration. Never put a private key in Render or this repository. This build creates or controls no wallet and has not launched production payment collection.
+
+The included `x402_mcp_test_once.py` is an isolated one-attempt test client. Do not clear its sentinel or repeat a testnet payment without separate explicit authorization.
 
 Confidence is qualitative and uncalibrated; the phrase rules have only been checked against a small, synthetic benchmark. This is a pilot, not a validated or profitable product.
