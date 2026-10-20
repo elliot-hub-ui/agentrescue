@@ -73,7 +73,7 @@ def _allow(method: str) -> bool:
 
 
 class McpTrafficBounds:
-    """Bound traffic and provide modern discovery for the pinned legacy SDK."""
+    """Bound request and response traffic for the public MCP endpoint."""
 
     def __init__(self, app):
         self.app = app
@@ -146,19 +146,55 @@ class McpTrafficBounds:
                 return
             await send(message)
 
-        # mcp==1.30 supports the 2025 handshake but not the 2026 discovery
-        # method. Serve discovery here and truthfully advertise only the older
-        # protocol versions that the pinned x402 FastMCP wrapper can handle.
-        if method == "POST" and scope.get("path") == "/mcp":
-            try:
-                request_json = json.loads(request_body)
-            except (TypeError, ValueError):
-                request_json = None
-            if isinstance(request_json, dict) and request_json.get("method") == "server/discover":
-                await self._discover(scope, headers, request_json, app_receive, bounded_send)
-                return
-
         await self.app(scope, app_receive, bounded_send)
+
+class McpPostRoute(Route):
+    """Add 2026 server/discover while proxying supported MCP POSTs to FastMCP."""
+
+    def __init__(self, mcp_app):
+        self.mcp_app = mcp_app
+        super().__init__("/mcp", self.unused_endpoint, methods=["POST"])
+
+    async def unused_endpoint(self, request: Request):  # pragma: no cover - handle() owns dispatch
+        return JSONResponse({"error": "not_found"}, status_code=404)
+
+    async def handle(self, scope, receive, send):
+        body_parts = []
+        total = 0
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            part = message.get("body", b"")
+            total += len(part)
+            if total > MAX_REQUEST_BYTES:
+                response = JSONResponse({"error": "payload_too_large"}, status_code=413)
+                return await response(scope, receive, send)
+            body_parts.append(part)
+            if not message.get("more_body", False):
+                break
+        request_body = b"".join(body_parts)
+        headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])}
+        try:
+            request_json = json.loads(request_body)
+        except (TypeError, ValueError):
+            request_json = None
+        if isinstance(request_json, dict) and request_json.get("method") == "server/discover":
+            await self._discover(scope, headers, request_json, receive, send)
+            return
+
+        replayed = False
+
+        async def replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": request_body, "more_body": False}
+            return await receive()
+
+        await self.mcp_app(scope, replay_receive, send)
 
     async def _discover(self, scope, headers, request_json, receive, send):
         request_id = request_json.get("id")
@@ -193,17 +229,17 @@ class McpTrafficBounds:
             return await PlainTextResponse("Invalid Origin header", status_code=403)(scope, receive, send)
 
         if request_json.get("jsonrpc") != "2.0" or request_id is None:
-            return await error(-32600, "Invalid Request") (scope, receive, send)
+            return await error(-32600, "Invalid Request")(scope, receive, send)
         params = request_json.get("params", {})
         if params is None:
             params = {}
         if not isinstance(params, dict):
-            return await error(-32602, "params must be an object") (scope, receive, send)
+            return await error(-32602, "params must be an object")(scope, receive, send)
         meta = params.get("_meta", {})
         if meta is None:
             meta = {}
         if not isinstance(meta, dict):
-            return await error(-32602, "_meta must be an object") (scope, receive, send)
+            return await error(-32602, "_meta must be an object")(scope, receive, send)
         version = meta.get("io.modelcontextprotocol/protocolVersion")
         if version != "2026-07-28":
             return await error(
@@ -361,6 +397,7 @@ app = Starlette(
         Route("/health", health, methods=["GET"]),
         Route("/llms.txt", llms, methods=["GET"]),
         Route("/", home, methods=["GET"]),
+        McpPostRoute(mcp_app),
         Mount("/", app=mcp_app),
     ],
     middleware=[Middleware(McpTrafficBounds)],
