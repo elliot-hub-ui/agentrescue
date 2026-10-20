@@ -1,6 +1,10 @@
+import json
 import unittest
+from unittest import mock
 
-from paid_trial_app import MAINNET, TESTNET, payment_settings
+from starlette.testclient import TestClient
+
+from paid_trial_app import MAINNET, TESTNET, app, payment_settings
 
 
 class PaidTrialConfigTests(unittest.TestCase):
@@ -52,6 +56,44 @@ class PaidTrialConfigTests(unittest.TestCase):
                     "AGENTRESCUE_X402_NETWORK": MAINNET,
                     "AGENTRESCUE_X402_PAY_TO": address,
                 })
+
+    def test_mcp_lists_tool_for_free_then_returns_no_charge_diagnosis(self):
+        headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
+            with TestClient(app) as client:
+                initialized = client.post("/mcp", headers=headers, json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-03-26",
+                        "capabilities": {},
+                        "clientInfo": {"name": "agentrescue-test", "version": "1.0"},
+                    },
+                })
+                self.assertEqual(initialized.status_code, 200, initialized.text)
+                negotiated = initialized.json()["result"]["protocolVersion"]
+                request_headers = {**headers, "MCP-Protocol-Version": negotiated}
+                listed = client.post("/mcp", headers=request_headers, json={
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
+                })
+                self.assertEqual(listed.status_code, 200, listed.text)
+                self.assertEqual(listed.json()["result"]["tools"][0]["name"], "diagnose_failure")
+                called = client.post("/mcp", headers=request_headers, json={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "diagnose_failure",
+                        "arguments": {"error": "HTTP 429 rate limit", "system": "http"},
+                    },
+                })
+                self.assertEqual(called.status_code, 200, called.text)
+                result = called.json()["result"]
+                self.assertFalse(result.get("isError", False))
+                diagnosis = json.loads(result["content"][0]["text"])
+                self.assertEqual(diagnosis["category"], "rate_limit")
+                self.assertEqual(diagnosis["payment"]["mode"], "disabled")
 
 
 if __name__ == "__main__":
