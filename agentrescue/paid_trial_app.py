@@ -73,7 +73,7 @@ def _allow(method: str) -> bool:
 
 
 class McpTrafficBounds:
-    """Bound request size, per-instance request rates and complete responses."""
+    """Bound traffic and provide modern discovery for the pinned legacy SDK."""
 
     def __init__(self, app):
         self.app = app
@@ -85,27 +85,41 @@ class McpTrafficBounds:
         if method in {"GET", "POST", "DELETE"} and not _allow(method):
             response = JSONResponse({"error": "rate_limit", "retry_after_seconds": WINDOW_SECONDS}, status_code=429)
             return await response(scope, receive, send)
-        if method in {"POST", "DELETE"}:
-            headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])}
+        headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])}
+        request_body = b""
+        app_receive = receive
+        if method == "POST":
             length = headers.get("content-length")
             if length and (not length.isdecimal() or int(length) > MAX_REQUEST_BYTES):
                 response = JSONResponse({"error": "payload_too_large"}, status_code=413)
                 return await response(scope, receive, send)
+            body_parts = []
+            total = 0
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    return
+                if message["type"] != "http.request":
+                    continue
+                part = message.get("body", b"")
+                total += len(part)
+                if total > MAX_REQUEST_BYTES:
+                    response = JSONResponse({"error": "payload_too_large"}, status_code=413)
+                    return await response(scope, receive, send)
+                body_parts.append(part)
+                if not message.get("more_body", False):
+                    break
+            request_body = b"".join(body_parts)
+            replayed = False
 
-            consumed = 0
+            async def replay_receive():
+                nonlocal replayed
+                if not replayed:
+                    replayed = True
+                    return {"type": "http.request", "body": request_body, "more_body": False}
+                return await receive()
 
-            original_receive = receive
-
-            async def bounded_receive():
-                nonlocal consumed
-                message = await original_receive()
-                if message["type"] == "http.request":
-                    consumed += len(message.get("body", b""))
-                    if consumed > MAX_REQUEST_BYTES:
-                        raise ValueError("payload_too_large")
-                return message
-
-            receive = bounded_receive
+            app_receive = replay_receive
 
         start = None
         body = bytearray()
@@ -132,13 +146,92 @@ class McpTrafficBounds:
                 return
             await send(message)
 
-        try:
-            await self.app(scope, receive, bounded_send)
-        except ValueError as exc:
-            if str(exc) != "payload_too_large":
-                raise
-            response = JSONResponse({"error": "payload_too_large"}, status_code=413)
-            await response(scope, receive, send)
+        # mcp==1.30 supports the 2025 handshake but not the 2026 discovery
+        # method. Serve discovery here and truthfully advertise only the older
+        # protocol versions that the pinned x402 FastMCP wrapper can handle.
+        if method == "POST" and scope.get("path") == "/mcp":
+            try:
+                request_json = json.loads(request_body)
+            except (TypeError, ValueError):
+                request_json = None
+            if isinstance(request_json, dict) and request_json.get("method") == "server/discover":
+                await self._discover(scope, headers, request_json, app_receive, bounded_send)
+                return
+
+        await self.app(scope, app_receive, bounded_send)
+
+    async def _discover(self, scope, headers, request_json, receive, send):
+        request_id = request_json.get("id")
+
+        def respond(payload, status=200):
+            return JSONResponse(payload, status_code=status)
+
+        def error(code, message, status=200, data=None):
+            detail = {"code": code, "message": message}
+            if data is not None:
+                detail["data"] = data
+            return respond({"jsonrpc": "2.0", "id": request_id, "error": detail}, status)
+
+        host = headers.get("host", "")
+        allowed_hosts = TransportSecuritySettings(
+            allowed_hosts=[
+                "agentrescue-mcp.onrender.com", "agentrescue-mcp.onrender.com:*",
+                "localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*",
+            ]
+        ).allowed_hosts
+        host_ok = host in allowed_hosts or any(
+            allowed.endswith(":*") and host.startswith(allowed[:-2] + ":")
+            for allowed in allowed_hosts
+        )
+        if not host_ok:
+            return await PlainTextResponse("Invalid Host header", status_code=421)(scope, receive, send)
+        origin = headers.get("origin")
+        allowed_origins = {
+            "https://agentrescue-mcp.onrender.com", "http://localhost", "http://127.0.0.1",
+        }
+        if origin and origin not in allowed_origins:
+            return await PlainTextResponse("Invalid Origin header", status_code=403)(scope, receive, send)
+
+        if request_json.get("jsonrpc") != "2.0" or request_id is None:
+            return await error(-32600, "Invalid Request") (scope, receive, send)
+        params = request_json.get("params", {})
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            return await error(-32602, "params must be an object") (scope, receive, send)
+        meta = params.get("_meta", {})
+        if meta is None:
+            meta = {}
+        if not isinstance(meta, dict):
+            return await error(-32602, "_meta must be an object") (scope, receive, send)
+        version = meta.get("io.modelcontextprotocol/protocolVersion")
+        if version != "2026-07-28":
+            return await error(
+                -32022, "Unsupported protocol version", 400,
+                {"supported": ["2026-07-28"], "requested": version},
+            )(scope, receive, send)
+        if headers.get("mcp-protocol-version") != version or headers.get("mcp-method") != "server/discover":
+            return await error(-32020, "Header mismatch", 400)(scope, receive, send)
+
+        settings = payment_settings()
+        price_text = (
+            "A successful diagnosis costs exactly $0.01 USDC per call."
+            if settings else "The paid trial is currently disabled; diagnosis calls are no-charge."
+        )
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "resultType": "complete",
+                "supportedVersions": ["2025-11-25", "2025-06-18", "2025-03-26"],
+                "capabilities": {"tools": {}},
+                "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "agentrescue", "version": "0.2.0"}},
+                "instructions": f"Use tools/list, then call diagnose_failure with a sanitized HTTP, API, or MCP error. {price_text} Advice is read-only.",
+                "ttlMs": 300000,
+                "cacheScope": "public",
+            },
+        }
+        return await JSONResponse(response)(scope, receive, send)
 
 
 mcp = FastMCP(
