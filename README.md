@@ -6,7 +6,7 @@ AgentRescue is an MCP-callable HTTP/API/MCP failure diagnosis tool for AI agents
 
 After deployment, add `https://agentrescue-mcp.onrender.com/mcp` as a Streamable HTTP MCP server. The tool is `diagnose_failure`; see [`agentrescue/MCP.md`](agentrescue/MCP.md) for the calling and safety contract.
 
-Send only synthetic or sanitized excerpts. Secret redaction is best-effort. The public pilot is free and no-charge. It uses an in-memory limit of 20 POST requests per minute per process; the limit resets on restart and is not account-level abuse protection. Feedback writes are disabled by default. The app does not persist credentials, request bodies, or feedback. Render may retain request metadata in platform logs.
+Send only synthetic or sanitized excerpts. Secret redaction is best-effort. The public pilot is free and no-charge. Each instance caps traffic at 60 GET and 20 POST requests per minute; response bodies are capped at 16 KB. These coarse limits reset on restart and are not account-level abuse protection. Feedback writes are disabled by default. The app does not persist credentials, request bodies, or feedback. Render may retain request metadata in platform logs.
 
 ## Local run and tests
 
@@ -22,7 +22,7 @@ The main server uses only the Python standard library. The optional x402 testnet
 
 ## Hosting
 
-`render.yaml` specifies one free Python web service with no database or paid resources. Free Render services can sleep when idle and take time to wake; this is a low-volume evaluation endpoint, not dependable production infrastructure. The service is stateless and no-charge. Do not upgrade its plan or add paid services without explicit approval.
+`render.yaml` specifies one always-on 0.5 CPU / 512 MB Render service with no database. Its compute plan costs about $7/month. The Hobby workspace includes 5 GB of outbound bandwidth shared across services, then charges $0.15/GB. The service is a no-charge evaluation pilot; watch workspace billing and suspend before the approved $40 monthly ceiling. Render does not provide a hard total-spend cap.
 
 ## Product status
 
