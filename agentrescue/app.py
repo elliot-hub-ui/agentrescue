@@ -64,9 +64,13 @@ def _has_signal(signal,text):
  return any(not _negated(text,m.start()) for m in matches)
 def diagnose(error,system='http'):
  s=R.sub('[REDACTED]',str(error)[:MAX_DIAGNOSIS_CHARS]);q=next((r for r in RULES if _has_signal(r[0],s)),None)
- if q: sig,cat,advice,risk=q;confidence='medium';basis='A deterministic rule matched a known error phrase; this is not a calibrated probability.'
- else: sig,cat,advice,risk,confidence,basis='','unknown','Capture a sanitized trace, timestamp and request ID; compare with a known-good run.','medium','low','No known error phrase matched; gather more evidence before acting.'
- return {'system':system,'category':cat,'summary':s[:500],'confidence':confidence,'confidence_basis':basis,'recovery':{'guidance':advice,'risk':risk,'requires_human_approval':risk=='high','execute_automatically':False},'evidence':{'signals':[sig] if sig else [],'redacted':'[REDACTED]' in s},'payment':{'mode':'test','charged':False}}
+ if q:
+  sig,cat,advice,risk=q;confidence='medium';basis='A deterministic rule matched a known error phrase; this is not a calibrated probability.'
+  summary=f"Matched a {cat.replace('_',' ')} failure indicator. Confirm it applies to the latest failing request."
+ else:
+  sig,cat,advice,risk,confidence,basis='','unknown','Capture a sanitized trace, timestamp and request ID; compare with a known-good run.','medium','low','No known error phrase matched; gather more evidence before acting.'
+  summary='No supported failure indicator matched. Gather a sanitized trace and compare with a known-good result.'
+ return {'system':system,'category':cat,'summary':summary,'confidence':confidence,'confidence_basis':basis,'recovery':{'guidance':advice,'risk':risk,'requires_human_approval':risk=='high','execute_automatically':False},'evidence':{'signals':[sig] if sig else [],'redacted':'[REDACTED]' in s},'payment':{'mode':'test','charged':False}}
 SCHEMA={
  'openapi':'3.1.0','info':{'title':'AgentRescue API','version':'0.2.0','description':'Rule-based, advisory HTTP/API/MCP failure diagnosis. Fixes are never executed.'},
  'paths':{
@@ -75,13 +79,13 @@ SCHEMA={
  },
  'components':{'schemas':{
   'DiagnoseRequest':{'type':'object','properties':{'error':{'type':'string','minLength':1,'maxLength':8000},'system':{'type':'string','enum':['http','api','mcp'],'default':'http'}},'required':['error'],'additionalProperties':False},
-  'Diagnosis':{'type':'object','properties':{'system':{'type':'string'},'category':{'type':'string'},'summary':{'type':'string'},'confidence':{'type':'string','enum':['low','medium','high']},'confidence_basis':{'type':'string'},'recovery':{'type':'object','properties':{'guidance':{'type':'string'},'risk':{'type':'string','enum':['low','medium','high']},'requires_human_approval':{'type':'boolean'},'execute_automatically':{'type':'boolean'}},'required':['guidance','risk','requires_human_approval','execute_automatically']},'evidence':{'type':'object','properties':{'signals':{'type':'array','items':{'type':'string'}},'redacted':{'type':'boolean'}},'required':['signals','redacted']},'payment':{'type':'object','properties':{'mode':{'type':'string','const':'test'},'charged':{'type':'boolean','const':False}},'required':['mode','charged']}},'required':['system','category','summary','confidence','confidence_basis','recovery','evidence','payment']},
+  'Diagnosis':{'type':'object','properties':{'system':{'type':'string'},'category':{'type':'string'},'summary':{'type':'string','description':'Generated summary; does not repeat the submitted diagnostic excerpt.'},'confidence':{'type':'string','enum':['low','medium','high']},'confidence_basis':{'type':'string'},'recovery':{'type':'object','properties':{'guidance':{'type':'string'},'risk':{'type':'string','enum':['low','medium','high']},'requires_human_approval':{'type':'boolean'},'execute_automatically':{'type':'boolean'}},'required':['guidance','risk','requires_human_approval','execute_automatically']},'evidence':{'type':'object','properties':{'signals':{'type':'array','items':{'type':'string'}},'redacted':{'type':'boolean'}},'required':['signals','redacted']},'payment':{'type':'object','properties':{'mode':{'type':'string','const':'test'},'charged':{'type':'boolean','const':False}},'required':['mode','charged']}},'required':['system','category','summary','confidence','confidence_basis','recovery','evidence','payment']},
   'FeedbackRequest':{'type':'object','properties':{'opt_in':{'type':'boolean','const':True},'category':{'type':'string','enum':sorted(FEEDBACK_CATEGORIES)},'outcome':{'type':'string','enum':sorted(FEEDBACK_OUTCOMES)}},'required':['opt_in'],'additionalProperties':False}
  }}
 }
 LLMS='''# AgentRescue
 
-> MCP diagnostic tool for LLM agents facing HTTP, API, and MCP failures.
+> MCP diagnostic tool for LLM agents facing HTTP, API, and MCP failures. Responses use generated summaries and do not echo submitted diagnostic text.
 
 ## Connect
 - MCP endpoint: POST /mcp (protocol 2026-07-28 stateless and legacy 2025 initialize).
@@ -197,7 +201,7 @@ class H(BaseHTTPRequestHandler):
    self.send(202,b'');return
   if method=='ping': return result({})
   if method=='tools/list':
-   return result({'resultType':'complete','tools':[{'name':'diagnose_failure','title':'Diagnose agent tool failure','description':'Diagnose a sanitized HTTP/API/MCP error and return safe, structured recovery guidance. Never executes remediation.','inputSchema':{'type':'object','properties':{'error':{'type':'string','minLength':1,'maxLength':MAX_DIAGNOSIS_CHARS},'system':{'type':'string','enum':['http','api','mcp']}},'required':['error'],'additionalProperties':False},'outputSchema':{'type':'object','properties':{'system':{'type':'string'},'category':{'type':'string'},'summary':{'type':'string'},'confidence':{'type':'string','enum':['low','medium','high']},'confidence_basis':{'type':'string'},'recovery':{'type':'object'},'evidence':{'type':'object'},'payment':{'type':'object'}},'required':['system','category','summary','confidence','confidence_basis','recovery','evidence','payment']},'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}}],'ttlMs':300000,'cacheScope':'public'})
+   return result({'resultType':'complete','tools':[{'name':'diagnose_failure','title':'Diagnose agent tool failure','description':'Diagnose a sanitized HTTP/API/MCP error and return safe, structured recovery guidance. Never executes remediation.','inputSchema':{'type':'object','properties':{'error':{'type':'string','minLength':1,'maxLength':MAX_DIAGNOSIS_CHARS},'system':{'type':'string','enum':['http','api','mcp']}},'required':['error'],'additionalProperties':False},'outputSchema':{'type':'object','properties':{'system':{'type':'string'},'category':{'type':'string'},'summary':{'type':'string','description':'Generated summary; does not repeat the submitted diagnostic excerpt.'},'confidence':{'type':'string','enum':['low','medium','high']},'confidence_basis':{'type':'string'},'recovery':{'type':'object'},'evidence':{'type':'object'},'payment':{'type':'object'}},'required':['system','category','summary','confidence','confidence_basis','recovery','evidence','payment']},'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}}],'ttlMs':300000,'cacheScope':'public'})
   if method=='tools/call':
    args=params.get('arguments',{})
    if args is None:args={}
