@@ -1,18 +1,17 @@
-# AgentRescue MCP service
+# MCP connection
 
-AgentRescue is a public MCP diagnostic service for agents that encounter HTTP, API, or MCP failures. Connect to `https://agentrescue-mcp.onrender.com/mcp` using Streamable HTTP and call `diagnose_failure` with a sanitized error and optional system (`http`, `api`, or `mcp`). It returns structured evidence and advisory recovery guidance; it never executes fixes.
+AgentRescue is an agent-callable diagnostic service. An agent may use `diagnose_failure` after an HTTP, API, or MCP call fails and the existing evidence does not resolve the issue. The tool returns a diagnosis, evidence signals, confidence basis, and recovery safety fields. It does not execute remediation.
 
-## Discovery and trial
+## Local connection
 
-MCP clients can use `server/discover`, `tools/list`, and `tools/call`. HTTP diagnostics are also available at `POST /v1/diagnose`; `GET /llms.txt` and `/openapi.json` describe the service and contract. Discovery and diagnosis are currently free. Production billing is not enabled.
+Start the free prototype with `python3 app.py`. It binds to `127.0.0.1:8000` and exposes `POST http://127.0.0.1:8000/mcp`. Configure the agent's MCP client for Streamable HTTP at that URL. The modern path supports MCP `2026-07-28` stateless HTTP (`server/discover`, `tools/list`, and `tools/call`) and legacy initialize compatibility through `2025-11-25`.
 
-## Traffic and response boundaries
+When called directly by an agent, send only the smallest relevant error excerpt after removing credentials, personal data, and customer content. Inputs are capped at 8,000 characters; pattern-based redaction is not a guarantee. Treat the response as advisory evidence. Do not broaden permissions, disable TLS checks, retry non-idempotent requests, or take high-risk action without required human approval. Continue only after verifying the action is safe and the expected result is achieved.
 
-- Each instance allows up to 60 GET and 20 POST requests per minute across all callers. Limits reset on process restart and are for a low-volume pilot, not DDoS protection.
-- Request and response bodies are capped at 16 KB; a diagnostic is limited to 8,000 characters.
-- Inputs are processed in memory. Request bodies are not logged or stored. Secret redaction is best-effort; send only synthetic or sanitized text.
-- Recovery advice is informational. High-risk steps require human approval.
+## Discovery and payment
 
-## Hosting and costs
+Discovery and tool listing are free. The hosted x402 implementation supports a fixed $0.01 USDC payment per successful diagnosis. It remains disabled until the owner provides a receiving address and reviews the final production configuration. The build does not create or control a wallet, and no production payment is enabled by default.
 
-The live service uses one 0.5 CPU / 512 MB Render web instance at approximately $7/month. Render Hobby workspaces include 5 GB of outbound bandwidth shared across services, then bill $0.15 per additional GB. The response cap and request limits bound the pilot, but Render does not impose a hard total spend cap. Check workspace usage and suspend the service before total spend approaches the approved $40 monthly ceiling.
+Each process allows at most 60 GET and 20 POST requests per rolling minute, with 16 KB request and response caps. The low-volume limits reset on restart and are not DDoS protection. Feedback writes remain disabled. Send only synthetic or sanitized input; redaction is best-effort.
+
+Render's estimated marginal bandwidth charge for the largest tested diagnostic response is a small fraction of one cent, so the proposed price has several-thousand-fold coverage of that marginal traffic cost. This is gross contribution before fixed hosting, facilitator/payment fees, refunds, taxes, and support; it does not establish profitability. Render does not impose a hard total spend cap, so monitor workspace usage against the approved $40 monthly ceiling.
