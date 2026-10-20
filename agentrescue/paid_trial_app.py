@@ -59,6 +59,19 @@ def payment_settings(env: dict[str, str] | None = None) -> dict[str, str] | None
     return {"network": network, "pay_to": pay_to, "mode": "testnet" if test_mode else "mainnet"}
 
 
+def payment_resource_config(settings: dict[str, str]):
+    """Build the payment config using the field names in the pinned x402 SDK."""
+    from x402.schemas import ResourceConfig
+
+    return ResourceConfig(
+        scheme="exact",
+        network=settings["network"],
+        pay_to=settings["pay_to"],
+        price=PRICE,
+        extra={"name": "USDC", "version": "2"},
+    )
+
+
 def _allow(method: str) -> bool:
     now = time.monotonic()
     queue = _gets if method == "GET" else _posts
@@ -304,7 +317,7 @@ async def _configure_tool() -> None:
             from x402.http import FacilitatorConfig, HTTPFacilitatorClient
             from x402.mcp import create_payment_wrapper
             from x402.mechanisms.evm.exact import ExactEvmServerScheme
-            from x402.schemas import ResourceConfig, ResourceInfo
+            from x402.schemas import ResourceInfo
 
             facilitator_url = os.getenv("AGENTRESCUE_X402_FACILITATOR", "https://x402.org/facilitator").strip()
             if facilitator_url not in {"https://x402.org/facilitator"}:
@@ -313,13 +326,7 @@ async def _configure_tool() -> None:
             resource_server.register(settings["network"], ExactEvmServerScheme())
             resource_server.initialize()
             accepts = resource_server.build_payment_requirements(
-                ResourceConfig(
-                    scheme="exact",
-                    network=settings["network"],
-                    payTo=settings["pay_to"],
-                    price=PRICE,
-                    extra={"name": "USDC", "version": "2"},
-                )
+                payment_resource_config(settings)
             )
             paid = create_payment_wrapper(
                 resource_server,
