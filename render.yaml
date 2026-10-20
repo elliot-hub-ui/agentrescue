@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: agentrescue-mcp
+    runtime: python
+    plan: 0.5c-512mb
+    rootDir: agentrescue
+    buildCommand: python -m compileall -q .
+    startCommand: python app.py
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
