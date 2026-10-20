@@ -141,7 +141,26 @@ class McpTrafficBounds:
             await response(scope, receive, send)
 
 
-mcp = FastMCP("AgentRescue", stateless_http=True, json_response=True)
+mcp = FastMCP(
+    "AgentRescue",
+    stateless_http=True,
+    json_response=True,
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=[
+            "agentrescue-mcp.onrender.com",
+            "agentrescue-mcp.onrender.com:*",
+            "localhost",
+            "localhost:*",
+            "127.0.0.1",
+            "127.0.0.1:*",
+        ],
+        allowed_origins=[
+            "https://agentrescue-mcp.onrender.com",
+            "http://localhost",
+            "http://127.0.0.1",
+        ],
+    ),
+)
 
 
 async def _configure_tool() -> None:
@@ -243,23 +262,7 @@ async def lifespan(app):
         yield
 
 
-mcp_app = mcp.streamable_http_app(
-    transport_security=TransportSecuritySettings(
-        allowed_hosts=[
-            "agentrescue-mcp.onrender.com",
-            "agentrescue-mcp.onrender.com:*",
-            "localhost",
-            "localhost:*",
-            "127.0.0.1",
-            "127.0.0.1:*",
-        ],
-        allowed_origins=[
-            "https://agentrescue-mcp.onrender.com",
-            "http://localhost",
-            "http://127.0.0.1",
-        ],
-    )
-)
+mcp_app = mcp.streamable_http_app()
 app = Starlette(
     routes=[
         Route("/health", health, methods=["GET"]),
