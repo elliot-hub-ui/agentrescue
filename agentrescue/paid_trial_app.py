@@ -15,6 +15,7 @@ from collections import deque
 from threading import Lock
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
@@ -242,7 +243,23 @@ async def lifespan(app):
         yield
 
 
-mcp_app = mcp.streamable_http_app()
+mcp_app = mcp.streamable_http_app(
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=[
+            "agentrescue-mcp.onrender.com",
+            "agentrescue-mcp.onrender.com:*",
+            "localhost",
+            "localhost:*",
+            "127.0.0.1",
+            "127.0.0.1:*",
+        ],
+        allowed_origins=[
+            "https://agentrescue-mcp.onrender.com",
+            "http://localhost",
+            "http://127.0.0.1",
+        ],
+    )
+)
 app = Starlette(
     routes=[
         Route("/health", health, methods=["GET"]),
