@@ -1,29 +1,25 @@
 # AgentRescue
 
-AgentRescue is an MCP-callable HTTP/API/MCP failure diagnosis tool for AI agents. Agents can call `diagnose_failure` for structured, evidence-linked recovery guidance. It never executes fixes.
+AgentRescue is an MCP-callable HTTP/API/MCP failure diagnosis tool for AI agents. Agents can call `diagnose_failure` for structured recovery guidance. It never executes fixes.
 
 ## Connect
 
-After deployment, add `https://agentrescue-mcp.onrender.com/mcp` as a Streamable HTTP MCP server. The tool is `diagnose_failure`; see [`agentrescue/MCP.md`](agentrescue/MCP.md) for the calling and safety contract.
+Connect an MCP client to `https://agentrescue-mcp.onrender.com/mcp` using Streamable HTTP. Discovery and tool listing are free. The paid-trial implementation charges exactly $0.01 USDC per successful diagnosis through x402 when explicitly enabled; payment collection is disabled by default and requires an owner-supplied receiving address and final review.
 
-Send only synthetic or sanitized excerpts. Secret redaction is best-effort. The public pilot is free and no-charge. Each instance caps traffic at 60 GET and 20 POST requests per minute; response bodies are capped at 16 KB. These coarse limits reset on restart and are not account-level abuse protection. Feedback writes are disabled by default. The app does not persist credentials, request bodies, or feedback. Render may retain request metadata in platform logs.
+Send only synthetic or sanitized excerpts. Secret redaction is best-effort. Traffic is capped at 60 GET and 20 POST requests per minute per instance, with 16 KB request/response limits. The app does not persist credentials or request bodies.
 
-## Local run and tests
+## Local development
 
 Python 3.12+:
 
 ```sh
 cd agentrescue
-HOST=127.0.0.1 PORT=8000 python3 app.py
+python3 app.py
 python3 -m unittest -v
 ```
 
-The main server uses only the Python standard library. The optional x402 testnet adapter tests require pinned dependencies in `agentrescue/requirements.txt` and `agentrescue/requirements.lock`. The isolated x402 test server is not part of the public service and has no mainnet mode.
+The hosted MCP entry point is `paid_trial_app.py`. Render deployment is defined in `render.yaml`; it pins dependencies, runs the test suite, uses the existing 0.5 CPU / 512 MB service plan, and leaves x402 payments disabled.
 
-## Hosting
+## Economics and product status
 
-`render.yaml` specifies one always-on 0.5 CPU / 512 MB Render service with no database. Its compute plan costs about $7/month. The Hobby workspace includes 5 GB of outbound bandwidth shared across services, then charges $0.15/GB. The service is a no-charge evaluation pilot; watch workspace billing and suspend before the approved $40 monthly ceiling. Render does not provide a hard total-spend cap.
-
-## Product status
-
-This is a pilot, not a validated or profitable product. The included benchmark is synthetic, and rule confidence is qualitative and uncalibrated. Real agent task lift, retention, and revenue remain unproven.
+At $0.01 per diagnosis and the largest measured response, estimated marginal bandwidth is several thousand times lower than the call price. That is gross contribution before fixed hosting, facilitator/payment fees, refunds, taxes, and support. It does not prove profitability. Agent demand, task lift, and repeat use remain unvalidated; see `venture/` for the synthetic benchmark and pilot plan.
