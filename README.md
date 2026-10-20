@@ -6,7 +6,7 @@ AgentRescue analyzes a sanitized error and returns a structured diagnosis, evide
 
 ## Try the hosted MCP service
 
-After deployment, connect an MCP client to `https://<service-host>/mcp`. The server supports the `diagnose_failure` tool. It accepts an error message and an optional system category (`http`, `api`, or `mcp`). See [`agentrescue/MCP.md`](agentrescue/MCP.md) for protocol details.
+Connect an MCP client to `https://agentrescue-mcp.onrender.com/mcp`. The server supports the `diagnose_failure` tool. It accepts an error message and an optional system category (`http`, `api`, or `mcp`). See [`agentrescue/MCP.md`](agentrescue/MCP.md) for protocol details.
 
 Only send synthetic or sanitized examples. Secret redaction is best-effort. The service processes requests in memory, does not log request bodies, and does not save feedback. A coarse per-instance request limit protects the low-volume pilot.
 
