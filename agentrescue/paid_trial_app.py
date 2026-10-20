@@ -81,10 +81,10 @@ class McpTrafficBounds:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         method = scope.get("method", "")
-        if method in {"GET", "POST"} and not _allow(method):
+        if method in {"GET", "POST", "DELETE"} and not _allow(method):
             response = JSONResponse({"error": "rate_limit", "retry_after_seconds": WINDOW_SECONDS}, status_code=429)
             return await response(scope, receive, send)
-        if method == "POST":
+        if method in {"POST", "DELETE"}:
             headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])}
             length = headers.get("content-length")
             if length and (not length.isdecimal() or int(length) > MAX_REQUEST_BYTES):
