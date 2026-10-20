@@ -4,7 +4,15 @@ from unittest import mock
 
 from starlette.testclient import TestClient
 
-from paid_trial_app import MAINNET, TESTNET, app, payment_resource_config, payment_settings
+from paid_trial_app import (
+    CDP_FACILITATOR_URL,
+    MAINNET,
+    TESTNET,
+    app,
+    payment_facilitator_config,
+    payment_resource_config,
+    payment_settings,
+)
 
 
 class PaidTrialConfigTests(unittest.TestCase):
@@ -67,6 +75,32 @@ class PaidTrialConfigTests(unittest.TestCase):
             })["facilitator_url"],
             "https://facilitator.example.test",
         )
+
+    def test_cdp_facilitator_requires_api_credentials(self):
+        settings = {"facilitator_url": CDP_FACILITATOR_URL}
+        with self.assertRaisesRegex(RuntimeError, "CDP_API_KEY_ID and CDP_API_KEY_SECRET"):
+            payment_facilitator_config(settings, {})
+
+    def test_cdp_facilitator_uses_official_authenticated_config(self):
+        import sys
+        from types import ModuleType
+
+        fake_cdp = ModuleType("cdp")
+        fake_cdp.__path__ = []
+        fake_x402 = ModuleType("cdp.x402")
+        expected = object()
+        fake_x402.create_facilitator_config = mock.Mock(return_value=expected)
+        env = {"CDP_API_KEY_ID": "test-id", "CDP_API_KEY_SECRET": "test-secret"}
+        with mock.patch.dict(sys.modules, {"cdp": fake_cdp, "cdp.x402": fake_x402}):
+            self.assertIs(payment_facilitator_config(
+                {"facilitator_url": CDP_FACILITATOR_URL}, env
+            ), expected)
+        fake_x402.create_facilitator_config.assert_called_once_with()
+
+    def test_custom_facilitator_keeps_explicit_url_config(self):
+        settings = {"facilitator_url": "https://facilitator.example.test"}
+        config = payment_facilitator_config(settings, {})
+        self.assertEqual(config.url, settings["facilitator_url"])
 
     def test_enabled_mode_fails_closed_without_network_or_payee(self):
         with self.assertRaises(RuntimeError):

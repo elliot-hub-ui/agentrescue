@@ -13,9 +13,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: agentrescue/requirements.lock
-      - name: Install pinned dependencies
-        run: python -m pip install -r agentrescue/requirements.txt -r agentrescue/requirements.lock
+          cache-dependency-path: |
+            agentrescue/requirements.lock
+            agentrescue/requirements-paid.txt
+      - name: Install pinned and paid-trial dependencies
+        run: python -m pip install -r agentrescue/requirements.txt -r agentrescue/requirements.lock -r agentrescue/requirements-paid.txt
       - name: Compile and test
         run: |
           python -m compileall -q agentrescue

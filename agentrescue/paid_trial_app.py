@@ -90,6 +90,32 @@ def payment_settings(env: dict[str, str] | None = None) -> dict[str, str] | None
     }
 
 
+CDP_FACILITATOR_URL = "https://api.cdp.coinbase.com/platform/v2/x402"
+
+
+def payment_facilitator_config(settings: dict[str, str], env: dict[str, str] | None = None):
+    """Build facilitator config, using CDP's official auth helper when selected."""
+    from x402.http import FacilitatorConfig
+
+    facilitator_url = settings["facilitator_url"].rstrip("/")
+    if facilitator_url == CDP_FACILITATOR_URL:
+        env = os.environ if env is None else env
+        if not env.get("CDP_API_KEY_ID", "").strip() or not env.get("CDP_API_KEY_SECRET", "").strip():
+            raise RuntimeError(
+                "The CDP facilitator requires CDP_API_KEY_ID and CDP_API_KEY_SECRET"
+            )
+        try:
+            from cdp.x402 import create_facilitator_config
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "The CDP facilitator requires the optional cdp-sdk dependency; "
+                "install requirements-paid.txt"
+            ) from exc
+        return create_facilitator_config()
+
+    return FacilitatorConfig(url=settings["facilitator_url"])
+
+
 def payment_resource_config(settings: dict[str, str]):
     """Build the payment config using the field names in the pinned x402 SDK."""
     from x402.schemas import ResourceConfig
@@ -371,13 +397,13 @@ async def _configure_tool() -> None:
         paid = None
         if settings:
             from x402 import x402ResourceServer
-            from x402.http import FacilitatorConfig, HTTPFacilitatorClient
+            from x402.http import HTTPFacilitatorClient
             from x402.mcp import create_payment_wrapper
             from x402.mechanisms.evm.exact import ExactEvmServerScheme
             from x402.schemas import ResourceInfo
 
             resource_server = x402ResourceServer(
-                HTTPFacilitatorClient(FacilitatorConfig(url=settings["facilitator_url"]))
+                HTTPFacilitatorClient(payment_facilitator_config(settings))
             )
             resource_server.register(settings["network"], ExactEvmServerScheme())
             resource_server.initialize()
