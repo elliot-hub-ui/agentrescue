@@ -24,6 +24,10 @@ class HandlerTests(unittest.TestCase):
  def test_llms_txt_explains_agent_safety_and_payment(self):
   h=Capture('/llms.txt',{});h.do_GET()
   self.assertEqual(h.response[0],200);self.assertIn('LLM',h.response[1].decode());self.assertIn('no-charge',h.response[1].decode())
+ def test_homepage_links_the_agent_guide(self):
+  h=Capture('/',{});h.do_GET()
+  self.assertEqual(h.response[0],200)
+  self.assertIn('href="/llms.txt"',h.response[1].decode())
  def test_tool_annotations_mark_read_only(self):
   h=Capture('/mcp',{'jsonrpc':'2.0','id':3,'method':'tools/list','params':{'_meta':{'io.modelcontextprotocol/protocolVersion':'2026-07-28'}}});h.headers['MCP-Protocol-Version']='2026-07-28';h.headers['Mcp-Method']='tools/list';h.do_POST()
   ann=h.response[1]['result']['tools'][0]['annotations'];self.assertTrue(ann['readOnlyHint']);self.assertFalse(ann['destructiveHint'])
