@@ -60,7 +60,7 @@ class PaidTrialConfigTests(unittest.TestCase):
     def test_mcp_lists_tool_for_free_then_returns_no_charge_diagnosis(self):
         headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
         with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
-            with TestClient(app) as client:
+            with TestClient(app, base_url="http://agentrescue-mcp.onrender.com") as client:
                 initialized = client.post("/mcp", headers=headers, json={
                     "jsonrpc": "2.0",
                     "id": 1,
@@ -94,6 +94,8 @@ class PaidTrialConfigTests(unittest.TestCase):
                 diagnosis = json.loads(result["content"][0]["text"])
                 self.assertEqual(diagnosis["category"], "rate_limit")
                 self.assertEqual(diagnosis["payment"]["mode"], "disabled")
+                rejected = client.get("/mcp", headers={"Host": "attacker.example"})
+                self.assertEqual(rejected.status_code, 421)
 
 
 if __name__ == "__main__":
