@@ -10,12 +10,23 @@ RATE_LIMIT_WINDOW_SECONDS=60
 MAX_POSTS_PER_WINDOW=20
 _recent_posts=deque()
 _rate_limit_lock=Lock()
+MAX_GETS_PER_WINDOW=60
+_recent_gets=deque()
+_get_lock=Lock()
+MAX_RESPONSE_BYTES=16000
 def allow_post(now=None):
  now=time.monotonic() if now is None else now
  with _rate_limit_lock:
   while _recent_posts and _recent_posts[0] <= now-RATE_LIMIT_WINDOW_SECONDS:_recent_posts.popleft()
   if len(_recent_posts)>=MAX_POSTS_PER_WINDOW:return False
   _recent_posts.append(now)
+  return True
+def allow_get(now=None):
+ now=time.monotonic() if now is None else now
+ with _get_lock:
+  while _recent_gets and _recent_gets[0] <= now-RATE_LIMIT_WINDOW_SECONDS:_recent_gets.popleft()
+  if len(_recent_gets)>=MAX_GETS_PER_WINDOW:return False
+  _recent_gets.append(now)
   return True
 FEEDBACK_CATEGORIES={'rate_limit','authentication','authorization','timeout','unavailable','gateway','tls','connectivity','server_error','mcp_protocol','dns','bad_request','not_found','semantic_failure','unknown'}
 FEEDBACK_OUTCOMES={'resolved','not_resolved','unsure'}
@@ -81,7 +92,8 @@ LLMS='''# AgentRescue
 ## Safety and payment
 - Send sanitized diagnostic text only; never include credentials or personal data.
 - Advice is informational and never runs a fix. High-risk advice requires human review.
-- Evaluation is free and no-charge; production x402 payments are not configured.
+- Evaluation is free and no-charge; production payments are not configured.
+- Per-instance limits are 60 GET and 20 POST requests per minute; response bodies are capped at 16 KB.
 '''
 ROBOTS='''User-agent: *
 Allow: /
@@ -91,8 +103,21 @@ HTML='''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewpor
 class H(BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def send(self,status,obj,typ='application/json'):
-  b=obj if isinstance(obj,bytes) else json.dumps(obj).encode();self.send_response(status);self.send_header('Content-Type',typ);self.send_header('Content-Length',str(len(b)));self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(b)
+  b=obj if isinstance(obj,bytes) else json.dumps(obj).encode()
+  if len(b)>MAX_RESPONSE_BYTES:
+   if isinstance(obj,dict) and obj.get('jsonrpc')=='2.0':
+    ident=obj.get('id')
+    if len(json.dumps(ident).encode())>128:ident=None
+    obj={'jsonrpc':'2.0','id':ident,'error':{'code':-32603,'message':'response exceeds maximum size'}}
+    status=200
+   else:
+    obj={'error':'response_too_large'}
+    status=500
+   typ='application/json'
+   b=json.dumps(obj).encode()
+  self.send_response(status);self.send_header('Content-Type',typ);self.send_header('Content-Length',str(len(b)));self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(b)
  def do_GET(self):
+  if not allow_get():return self.send(429,{'error':'rate_limit','retry_after_seconds':RATE_LIMIT_WINDOW_SECONDS})
   if self.path=='/health':return self.send(200,{'status':'ok'})
   if self.path=='/llms.txt':return self.send(200,LLMS.encode(),'text/plain; charset=utf-8')
   if self.path=='/robots.txt':return self.send(200,ROBOTS.encode(),'text/plain; charset=utf-8')
