@@ -1,5 +1,13 @@
 # MCP connection
 
-AgentRescue supports MCP `2026-07-28` stateless HTTP at `POST /mcp`, including `server/discover`, `tools/list`, and `tools/call`; it also accepts the legacy initialize handshake through `2025-11-25`. The modern path requires matching `MCP-Protocol-Version` and `Mcp-Method` headers, plus matching `Mcp-Name` on `tools/call`. The local server binds to `127.0.0.1` by default. The official Python MCP and x402 SDKs completed one Base Sepolia test payment through Streamable HTTP; the testnet transaction and limits are documented in `../venture/technical-readiness.md`. This verifies that one path, not broad client compatibility.
+AgentRescue is an agent-callable diagnostic service. An agent may use `diagnose_failure` after an HTTP, API, or MCP call fails and the existing evidence does not resolve the issue. The tool returns a diagnosis, evidence signals, confidence basis, and recovery safety fields. It does not execute remediation.
 
-The tool `diagnose_failure` accepts `error` (up to 8,000 characters) and optional `system` (`http`, `api`, or `mcp`). Its response includes category, qualitative confidence and its basis, evidence, and recovery safety fields. It does not execute remediation. The free prototype remains test/no-charge mode; the separate x402 test harness is fixed to one $0.01 testnet transaction and must not be treated as production billing.
+## Local connection
+
+Start the free prototype with `python3 app.py`. It binds to `127.0.0.1:8000` and exposes `POST http://127.0.0.1:8000/mcp`. Configure the agent's MCP client for Streamable HTTP at that URL. The modern path supports MCP `2026-07-28` stateless HTTP (`server/discover`, `tools/list`, and `tools/call`) and legacy initialize compatibility through `2025-11-25`.
+
+When called directly by an agent, send only the smallest relevant error excerpt after removing credentials, personal data, and customer content. Inputs are capped at 8,000 characters; pattern-based redaction is not a guarantee. Treat the response as advisory evidence. Do not broaden permissions, disable TLS checks, retry non-idempotent requests, or take high-risk action without required human approval. Continue only after verifying the action is safe and the expected result is achieved.
+
+## Discovery and payment
+
+The service exposes MCP `server/discover`, `tools/list`, and `tools/call`. The public pilot is free and no-charge, with a shared cap of 20 POST requests per minute per process. Feedback writes are disabled unless `AGENTRESCUE_FEEDBACK_ENABLED=true` is explicitly configured; do not enable that on the public demo. The x402 server is an isolated Base Sepolia test only, not production billing. Public deployment is approved and being configured at `https://agentrescue-mcp.onrender.com/mcp`; a separate MCP Registry listing has not been authorized. Render Free sleeps after idle periods, so this endpoint is for low-volume trials, not production reliability.

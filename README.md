@@ -1,29 +1,29 @@
 # AgentRescue
 
-An MCP service for agents that need a safe next step when an HTTP, API, or MCP call fails.
+AgentRescue is an MCP-callable HTTP/API/MCP failure diagnosis tool for AI agents. Agents can call `diagnose_failure` for structured, evidence-linked recovery guidance. It never executes fixes.
 
-AgentRescue analyzes a sanitized error and returns a structured diagnosis, evidence, qualitative confidence, and recovery guidance. It does not execute repairs, retry requests, connect to customer systems, or collect payment.
+## Connect
 
-## Try the hosted MCP service
+After deployment, add `https://agentrescue-mcp.onrender.com/mcp` as a Streamable HTTP MCP server. The tool is `diagnose_failure`; see [`agentrescue/MCP.md`](agentrescue/MCP.md) for the calling and safety contract.
 
-Connect an MCP client to `https://agentrescue-mcp.onrender.com/mcp`. The server supports the `diagnose_failure` tool. It accepts an error message and an optional system category (`http`, `api`, or `mcp`). See [`agentrescue/MCP.md`](agentrescue/MCP.md) for protocol details.
+Send only synthetic or sanitized excerpts. Secret redaction is best-effort. The public pilot is free and no-charge. It uses an in-memory limit of 20 POST requests per minute per process; the limit resets on restart and is not account-level abuse protection. Feedback writes are disabled by default. The app does not persist credentials, request bodies, or feedback. Render may retain request metadata in platform logs.
 
-Only send synthetic or sanitized examples. Secret redaction is best-effort. The service processes requests in memory, does not log request bodies, and does not save feedback. A coarse per-instance request limit protects the low-volume pilot.
+## Local run and tests
 
-## Run locally
-
-Python 3.10+ is recommended; runtime code uses only the standard library.
+Python 3.12+:
 
 ```sh
 cd agentrescue
 HOST=127.0.0.1 PORT=8000 python3 app.py
-python3 -m unittest test_app test_benchmark test_handlers -v
+python3 -m unittest -v
 ```
 
-## Deploy
+The main server uses only the Python standard library. The optional x402 testnet adapter tests require pinned dependencies in `agentrescue/requirements.txt` and `agentrescue/requirements.lock`. The isolated x402 test server is not part of the public service and has no mainnet mode.
 
-The repository-level [`render.yaml`](render.yaml) provisions a single always-on 0.5 CPU / 512 MB Render service with manual deployments and no database. Its compute price is approximately $7/month. Render Hobby workspaces include 5 GB of monthly outbound bandwidth and charge $0.15 per additional GB; the available spend cap applies to build-pipeline minutes, not total service spend. Monitor bandwidth and billing, and suspend the pilot before the approved $40 ceiling.
+## Hosting
 
-## Project status
+`render.yaml` specifies one free Python web service with no database or paid resources. Free Render services can sleep when idle and take time to wake; this is a low-volume evaluation endpoint, not dependable production infrastructure. The service is stateless and no-charge. Do not upgrade its plan or add paid services without explicit approval.
 
-This is an early validation pilot. The included benchmark is synthetic and is not evidence of customer demand or product accuracy. No customer outcomes have been collected. Success means agents independently discover the service, repeatedly use its diagnostics, and provide evidence that the saved recovery time is worth paying for.
+## Product status
+
+This is a pilot, not a validated or profitable product. The included benchmark is synthetic, and rule confidence is qualitative and uncalibrated. Real agent task lift, retention, and revenue remain unproven.

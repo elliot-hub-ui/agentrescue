@@ -1,0 +1,22 @@
+[
+ {"error":"HTTP 429 Too Many Requests","expected":"rate_limit"},
+ {"error":"HTTP 401 Unauthorized","expected":"authentication"},
+ {"error":"HTTP 403 Forbidden","expected":"authorization"},
+ {"error":"Upstream request timeout","expected":"timeout"},
+ {"error":"HTTP 503 Service Unavailable","expected":"unavailable"},
+ {"error":"HTTP 502 Bad Gateway","expected":"gateway"},
+ {"error":"TLS certificate verification failed","expected":"tls"},
+ {"error":"Connection refused on localhost:8080","expected":"connectivity"},
+ {"error":"HTTP 500 Internal Server Error","expected":"server_error"},
+ {"error":"MCP initialize returned invalid protocol version","expected":"mcp_protocol"},
+ {"error":"MCP tools/list returned invalid JSON","expected":"mcp_protocol"},
+ {"error":"MCP tool call exceeded timeout","expected":"timeout"},
+ {"error":"OAuth token expired for MCP server","expected":"authentication"},
+ {"error":"DNS lookup failed for api.example.test","expected":"dns"},
+ {"error":"Connection reset by peer","expected":"connectivity"},
+ {"error":"HTTP 429 Retry-After: 30","expected":"rate_limit"},
+ {"error":"HTTP 401 bearer secret ABCDEFGHIJKLMNOP","expected":"authentication"},
+ {"error":"Tool returned success but agent produced no result","expected":"semantic_failure"},
+ {"error":"Invalid API request: field model is required","expected":"bad_request"},
+ {"error":"HTTP 404 resource not found","expected":"not_found"}
+]

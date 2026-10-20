@@ -8,6 +8,21 @@ class T(unittest.TestCase):
  def test_safety_gate(self):
   x=diagnose('403');self.assertTrue(x['recovery']['requires_human_approval']);self.assertFalse(x['recovery']['execute_automatically'])
  def test_unknown(self):self.assertEqual(diagnose('odd')['category'],'unknown')
+ def test_does_not_infer_failures_from_negated_or_incidental_mentions(self):
+  examples=[
+   'HTTP 200 OK; no 429 occurred',
+   'No HTTP 500 errors; 500 ms latency',
+   'This field is not required and the API call succeeded',
+   'The sample code includes a 404 URL in its documentation',
+   'No timeout occurred; task completed successfully',
+   'Error string says "connection refused" in a quoted example only',
+   'HTTP 403 appears in a dashboard chart, but request returned 200',
+   'Expected status 429 but got status 200',
+   'No DNS failure; hostname resolved successfully',
+   'HTTP 503 was a historical incident; current health check is 200',
+  ]
+  for value in examples:
+   with self.subTest(value=value):self.assertEqual(diagnose(value)['category'],'unknown')
  def test_confidence_is_qualitative_and_uncalibrated(self):
   x=diagnose('HTTP 429');self.assertEqual(x['confidence'],'medium');self.assertIn('not a calibrated probability',x['confidence_basis'])
  def test_openapi_describes_real_diagnosis_contract(self):

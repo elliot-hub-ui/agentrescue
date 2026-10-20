@@ -1,5 +1,7 @@
 import io, json, unittest
+from unittest import mock
 from email.message import Message
+import app
 from app import H
 class Capture(H):
  def __init__(self, path, payload):
@@ -11,9 +13,11 @@ class RawCapture(Capture):
   for key,value in (headers or {}).items():self.headers[key]=value
   self.rfile=io.BytesIO(body);self.response=None
 class HandlerTests(unittest.TestCase):
+ def setUp(self):
+  with app._rate_limit_lock:app._recent_posts.clear()
  def test_llms_txt_explains_agent_safety_and_payment(self):
   h=Capture('/llms.txt',{});h.do_GET()
-  self.assertEqual(h.response[0],200);self.assertIn('LLM',h.response[1].decode());self.assertIn('no-charge',h.response[1].decode());self.assertIn('not logged or stored',h.response[1].decode())
+  self.assertEqual(h.response[0],200);self.assertIn('LLM',h.response[1].decode());self.assertIn('no-charge',h.response[1].decode())
  def test_tool_annotations_mark_read_only(self):
   h=Capture('/mcp',{'jsonrpc':'2.0','id':3,'method':'tools/list','params':{'_meta':{'io.modelcontextprotocol/protocolVersion':'2026-07-28'}}});h.headers['MCP-Protocol-Version']='2026-07-28';h.headers['Mcp-Method']='tools/list';h.do_POST()
   ann=h.response[1]['result']['tools'][0]['annotations'];self.assertTrue(ann['readOnlyHint']);self.assertFalse(ann['destructiveHint'])
@@ -30,21 +34,34 @@ class HandlerTests(unittest.TestCase):
  def test_http_rejects_unknown_system(self):
   h=Capture('/v1/diagnose',{'error':'HTTP 500','system':'shell'});h.do_POST()
   self.assertEqual(h.response[0],400);self.assertEqual(h.response[1]['error'],'invalid_system')
- def test_public_feedback_is_disabled(self):
-  h=Capture('/v1/feedback',{'opt_in':True});h.do_POST()
-  self.assertEqual(h.response[0],404);self.assertFalse(__import__('os').path.exists('data/feedback.jsonl'))
- def test_post_rate_limit_is_bounded(self):
-  import app
-  app._post_count=app.POST_LIMIT
-  h=Capture('/v1/diagnose',{'error':'HTTP 429'});h.do_POST()
-  self.assertEqual(h.response[0],429);self.assertGreaterEqual(h.response[1]['retry_after_seconds'],1)
-  app._post_count=0
+ def test_feedback_is_disabled_by_default(self):
+  with mock.patch.dict('os.environ',{},clear=True):
+   h=Capture('/v1/feedback',{'opt_in':True});h.do_POST()
+  self.assertEqual(h.response[0],404)
+ def test_feedback_requires_explicit_opt_in_when_enabled(self):
+  h=Capture('/v1/feedback',{'opt_in':False})
+  with mock.patch.dict('os.environ',{'AGENTRESCUE_FEEDBACK_ENABLED':'true'}):h.do_POST()
+  self.assertEqual(h.response[0],400);self.assertEqual(h.response[1]['error'],'explicit_opt_in_required')
+ def test_feedback_rejects_freeform_values_and_extra_fields(self):
+  value=Capture('/v1/feedback',{'opt_in':True,'category':'customer email alice@example.test','outcome':'resolved'})
+  with mock.patch.dict('os.environ',{'AGENTRESCUE_FEEDBACK_ENABLED':'true'}):value.do_POST()
+  self.assertEqual(value.response[0],400);self.assertEqual(value.response[1]['error'],'invalid_feedback_category')
+  extra=Capture('/v1/feedback',{'opt_in':True,'category':'unknown','outcome':'unsure','diagnostic':'private text'})
+  with mock.patch.dict('os.environ',{'AGENTRESCUE_FEEDBACK_ENABLED':'true'}):extra.do_POST()
+  self.assertEqual(extra.response[0],400);self.assertEqual(extra.response[1]['error'],'unsupported_feedback_field')
+ def test_feedback_stores_only_allowlisted_minimized_fields(self):
+  h=Capture('/v1/feedback',{'opt_in':True,'category':'rate_limit','outcome':'resolved'})
+  with mock.patch.dict('os.environ',{'AGENTRESCUE_FEEDBACK_ENABLED':'true'}), mock.patch('app.os.makedirs'), mock.patch('app.open',create=True) as open_mock, mock.patch('app.time.time',return_value=123):
+   h.do_POST()
+  self.assertEqual(h.response[0],201);self.assertEqual(open_mock.call_count,1)
+  stored=open_mock.return_value.__enter__.return_value.write.call_args.args[0]
+  self.assertEqual(json.loads(stored),{'category':'rate_limit','outcome':'resolved','at':123})
  def test_mcp_tools_call(self):
   h=Capture('/mcp',{'jsonrpc':'2.0','id':4,'method':'tools/call','params':{'name':'diagnose_failure','arguments':{'error':'HTTP 429'}}});h.do_POST()
   self.assertEqual(h.response[0],200); self.assertEqual(h.response[1]['result']['structuredContent']['category'],'rate_limit')
  def test_mcp_rejects_bad_params_arguments_and_long_errors(self):
   params=Capture('/mcp',{'jsonrpc':'2.0','id':1,'method':'tools/call','params':[]});params.do_POST()
-  self.assertEqual(params.response[1]['error']['code'],-32602)
+  self.assertEqual(params.response[1]['error']['code'],-32602);self.assertEqual(params.response[1]['error']['message'],'params must be an object')
   meta=Capture('/mcp',{'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'_meta':[]}});meta.do_POST()
   self.assertEqual(meta.response[1]['error']['code'],-32602)
   args=Capture('/mcp',{'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'arguments':[]}});args.do_POST()
@@ -54,6 +71,9 @@ class HandlerTests(unittest.TestCase):
  def test_mcp_null_params_is_valid_for_ping(self):
   h=Capture('/mcp',{'jsonrpc':'2.0','id':1,'method':'ping','params':None});h.do_POST()
   self.assertEqual(h.response[1]['result'],{})
+ def test_mcp_rejects_non_jsonrpc_envelope(self):
+  h=Capture('/mcp',{'id':1,'method':'ping'});h.do_POST()
+  self.assertEqual(h.response[1]['error']['code'],-32600)
  def test_modern_server_discover(self):
   h=Capture('/mcp',{'jsonrpc':'2.0','id':1,'method':'server/discover','params':{'_meta':{'io.modelcontextprotocol/protocolVersion':'2026-07-28'}}});h.headers['MCP-Protocol-Version']='2026-07-28';h.headers['Mcp-Method']='server/discover';h.do_POST()
   self.assertEqual(h.response[0],200);self.assertEqual(h.response[1]['result']['supportedVersions'],['2026-07-28'])
@@ -69,5 +89,8 @@ class HandlerTests(unittest.TestCase):
  def test_unknown_path_rejected(self):
   h=Capture('/nope',{});h.do_POST()
   self.assertEqual(h.response[0],404)
+ def test_post_rate_limit_returns_retry_after(self):
+  h=Capture('/v1/diagnose',{'error':'HTTP 429'})
+  with mock.patch('app.allow_post',return_value=False):h.do_POST()
+  self.assertEqual(h.response[0],429);self.assertEqual(h.response[1]['retry_after_seconds'],60)
 if __name__=='__main__':unittest.main()
-

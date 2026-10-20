@@ -1,13 +1,24 @@
 from http.server import BaseHTTPRequestHandler,HTTPServer
-import json,re,os,time,threading
+import json,re,os,time
+from collections import deque
+from http.server import ThreadingHTTPServer
+from threading import Lock
 MAX_BODY_BYTES=16000
-POST_LIMIT=20
-POST_WINDOW_SECONDS=60
-_post_lock=threading.Lock()
-_post_window_start=time.monotonic()
-_post_count=0
 MAX_DIAGNOSIS_CHARS=8000
 VALID_SYSTEMS={'http','api','mcp'}
+RATE_LIMIT_WINDOW_SECONDS=60
+MAX_POSTS_PER_WINDOW=20
+_recent_posts=deque()
+_rate_limit_lock=Lock()
+def allow_post(now=None):
+ now=time.monotonic() if now is None else now
+ with _rate_limit_lock:
+  while _recent_posts and _recent_posts[0] <= now-RATE_LIMIT_WINDOW_SECONDS:_recent_posts.popleft()
+  if len(_recent_posts)>=MAX_POSTS_PER_WINDOW:return False
+  _recent_posts.append(now)
+  return True
+FEEDBACK_CATEGORIES={'rate_limit','authentication','authorization','timeout','unavailable','gateway','tls','connectivity','server_error','mcp_protocol','dns','bad_request','not_found','semantic_failure','unknown'}
+FEEDBACK_OUTCOMES={'resolved','not_resolved','unsure'}
 R=re.compile(r'''(?isx)
     (?:
       -----BEGIN [^-]*KEY-----.*?-----END [^-]*KEY-----
@@ -20,19 +31,41 @@ R=re.compile(r'''(?isx)
       |[\w.+-]+@[\w.-]+\.[a-z]{2,}
     )''')
 RULES=[('429','rate_limit','Honor Retry-After; reduce concurrency and use bounded jittered backoff.','low'),('401','authentication','Check credential expiry, audience and scope; rotate exposed secrets.','high'),('403','authorization','Review permissions; do not broaden access automatically.','high'),('timeout','timeout','Check upstream latency and use bounded retries for idempotent requests.','medium'),('503','unavailable','Check dependency health and use a circuit breaker.','medium'),('502','gateway','Check upstream reachability, DNS and TLS.','medium'),('certificate','tls','Verify hostname and certificate chain; never disable TLS checks.','high'),('connection refused','connectivity','Confirm service host, port and listener.','medium'),('500','server_error','Inspect upstream logs by request ID; retry only idempotent requests.','medium'),('protocol version','mcp_protocol','Compare client and server protocol versions; confirm initialize negotiation and required capabilities.','medium'),('invalid json','mcp_protocol','Validate the MCP JSON-RPC envelope, content type, request ID and result shape.','medium'),('oauth token expired','authentication','Refresh OAuth through the configured flow; never expose or log tokens.','high'),('dns','dns','Check hostname, resolver health and service discovery.','medium'),('reset by peer','connectivity','Check upstream restarts and proxy or idle-connection timeouts.','medium'),('required','bad_request','Validate the request schema and required fields against the API version.','low'),('404','not_found','Check endpoint path, API version, resource identifier and environment.','low'),('no result','semantic_failure','Transport success can hide task failure. Inspect expected output and tool result content before retrying.','medium')]
+STATUS_CODES={'429','401','403','503','502','500','404'}
+def _negated(text,start):
+ before=text[max(0,start-30):start]
+ return bool(re.search(r'\b(?:no|not|never|without|did not|does not|is not|was not)\s+(?:[\w-]+\s+){0,2}$',before,re.I))
+def _has_signal(signal,text):
+ if signal in STATUS_CODES:
+  pattern=re.compile(rf'\b(?:HTTP\s*|status(?:\s+code)?\s*[:=]?\s*|response(?:\s+status)?\s*[:=]?\s*){signal}\b|\b{signal}\s+(?:too many requests|unauthorized|forbidden|not found|resource not found|bad gateway|service unavailable|internal server error)\b',re.I)
+  matches=[m for m in pattern.finditer(text) if not _negated(text,m.start())]
+  if not matches:
+   if text.strip()==signal:return True
+   return signal=='429' and bool(re.search(r'\brate[ -]?limit(?:ed| exceeded)?\b|too many requests',text,re.I))
+  success=list(re.finditer(r'\b(?:HTTP\s*|status(?:\s+code)?\s*[:=]?\s*|response(?:\s+status)?\s*[:=]?\s*|returned\s+|got\s+|health check(?:\s+is)?\s+)(2\d\d)\b',text,re.I))
+  return not (success and success[-1].start()>matches[-1].start())
+ if signal=='required':
+  matches=list(re.finditer(r'\b(?:is|are|was|were)\s+required\b|\brequired\s+(?:field|parameter|argument)\b|\bmissing\s+(?:a\s+)?required\b',text,re.I))
+ elif signal=='timeout':matches=list(re.finditer(r'\b(?:timeout|timed out)\b',text,re.I))
+ else:matches=list(re.finditer(re.escape(signal),text,re.I))
+ if not matches:return False
+ if signal=='connection refused' and re.search(r'\b(?:quoted )?example only\b',text,re.I):return False
+ return any(not _negated(text,m.start()) for m in matches)
 def diagnose(error,system='http'):
- s=R.sub('[REDACTED]',str(error)[:MAX_DIAGNOSIS_CHARS]);lo=s.lower();q=next((r for r in RULES if r[0] in lo),None)
+ s=R.sub('[REDACTED]',str(error)[:MAX_DIAGNOSIS_CHARS]);q=next((r for r in RULES if _has_signal(r[0],s)),None)
  if q: sig,cat,advice,risk=q;confidence='medium';basis='A deterministic rule matched a known error phrase; this is not a calibrated probability.'
  else: sig,cat,advice,risk,confidence,basis='','unknown','Capture a sanitized trace, timestamp and request ID; compare with a known-good run.','medium','low','No known error phrase matched; gather more evidence before acting.'
  return {'system':system,'category':cat,'summary':s[:500],'confidence':confidence,'confidence_basis':basis,'recovery':{'guidance':advice,'risk':risk,'requires_human_approval':risk=='high','execute_automatically':False},'evidence':{'signals':[sig] if sig else [],'redacted':'[REDACTED]' in s},'payment':{'mode':'test','charged':False}}
 SCHEMA={
- 'openapi':'3.1.0','info':{'title':'AgentRescue API','version':'0.1.0','description':'Rule-based, advisory HTTP/API/MCP failure diagnosis. Fixes are never executed.'},
+ 'openapi':'3.1.0','info':{'title':'AgentRescue API','version':'0.2.0','description':'Rule-based, advisory HTTP/API/MCP failure diagnosis. Fixes are never executed.'},
  'paths':{
   '/v1/diagnose':{'post':{'operationId':'diagnoseFailure','summary':'Diagnose a sanitized failure','requestBody':{'required':True,'content':{'application/json':{'schema':{'$ref':'#/components/schemas/DiagnoseRequest'}}}},'responses':{'200':{'description':'Diagnosis with gated recovery guidance','content':{'application/json':{'schema':{'$ref':'#/components/schemas/Diagnosis'}}}},'400':{'description':'Invalid JSON, system, or missing error text'},'411':{'description':'Content-Length header required'},'413':{'description':'Body exceeds 16 KB or diagnostic text exceeds 8,000 characters'}}}},
+  '/v1/feedback':{'post':{'operationId':'submitOptInFeedback','summary':'Submit minimized outcome feedback','requestBody':{'required':True,'content':{'application/json':{'schema':{'$ref':'#/components/schemas/FeedbackRequest'}}}},'responses':{'201':{'description':'Feedback accepted; only category, outcome and timestamp are stored'},'400':{'description':'Explicit opt-in required or fields have invalid types'}}}}
  },
  'components':{'schemas':{
   'DiagnoseRequest':{'type':'object','properties':{'error':{'type':'string','minLength':1,'maxLength':8000},'system':{'type':'string','enum':['http','api','mcp'],'default':'http'}},'required':['error'],'additionalProperties':False},
   'Diagnosis':{'type':'object','properties':{'system':{'type':'string'},'category':{'type':'string'},'summary':{'type':'string'},'confidence':{'type':'string','enum':['low','medium','high']},'confidence_basis':{'type':'string'},'recovery':{'type':'object','properties':{'guidance':{'type':'string'},'risk':{'type':'string','enum':['low','medium','high']},'requires_human_approval':{'type':'boolean'},'execute_automatically':{'type':'boolean'}},'required':['guidance','risk','requires_human_approval','execute_automatically']},'evidence':{'type':'object','properties':{'signals':{'type':'array','items':{'type':'string'}},'redacted':{'type':'boolean'}},'required':['signals','redacted']},'payment':{'type':'object','properties':{'mode':{'type':'string','const':'test'},'charged':{'type':'boolean','const':False}},'required':['mode','charged']}},'required':['system','category','summary','confidence','confidence_basis','recovery','evidence','payment']},
+  'FeedbackRequest':{'type':'object','properties':{'opt_in':{'type':'boolean','const':True},'category':{'type':'string','enum':sorted(FEEDBACK_CATEGORIES)},'outcome':{'type':'string','enum':sorted(FEEDBACK_OUTCOMES)}},'required':['opt_in'],'additionalProperties':False}
  }}
 }
 LLMS='''# AgentRescue
@@ -48,7 +81,7 @@ LLMS='''# AgentRescue
 ## Safety and payment
 - Send sanitized diagnostic text only; never include credentials or personal data.
 - Advice is informational and never runs a fix. High-risk advice requires human review.
-- Evaluation is free and no-charge; payment support is not enabled. Requests are processed in memory and are not logged or stored. A service-wide POST limit applies.
+- Evaluation is free and no-charge; production x402 payments are not configured.
 '''
 ROBOTS='''User-agent: *
 Allow: /
@@ -60,19 +93,16 @@ class H(BaseHTTPRequestHandler):
  def send(self,status,obj,typ='application/json'):
   b=obj if isinstance(obj,bytes) else json.dumps(obj).encode();self.send_response(status);self.send_header('Content-Type',typ);self.send_header('Content-Length',str(len(b)));self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(b)
  def do_GET(self):
+  if self.path=='/health':return self.send(200,{'status':'ok'})
   if self.path=='/llms.txt':return self.send(200,LLMS.encode(),'text/plain; charset=utf-8')
   if self.path=='/robots.txt':return self.send(200,ROBOTS.encode(),'text/plain; charset=utf-8')
   if self.path=='/openapi.json':return self.send(200,SCHEMA)
-  if self.path=='/health':return self.send(200,{'status':'ok'})
   if self.path=='/':return self.send(200,HTML.encode(),'text/html; charset=utf-8')
   self.send(404,{'error':'not_found'})
  def do_POST(self):
-  global _post_window_start,_post_count
-  now=time.monotonic()
-  with _post_lock:
-   if now-_post_window_start>=POST_WINDOW_SECONDS:_post_window_start=now;_post_count=0
-   if _post_count>=POST_LIMIT:return self.send(429,{'error':'rate_limit','retry_after_seconds':max(1,int(POST_WINDOW_SECONDS-(now-_post_window_start)))})
-   _post_count+=1
+  if self.path not in {'/v1/diagnose','/v1/feedback','/mcp'}:return self.send(404,{'error':'not_found'})
+  if self.path=='/v1/feedback' and os.getenv('AGENTRESCUE_FEEDBACK_ENABLED','').lower() not in {'1','true','yes'}:return self.send(404,{'error':'not_found'})
+  if not allow_post():return self.send(429,{'error':'rate_limit_exceeded','retry_after_seconds':RATE_LIMIT_WINDOW_SECONDS})
   raw_length=self.headers.get('Content-Length')
   if raw_length is None:return self.send(411,{'error':'content_length_required'})
   if not raw_length.isdecimal():return self.send(400,{'error':'invalid_content_length'})
@@ -91,20 +121,28 @@ class H(BaseHTTPRequestHandler):
    system=d.get('system','http')
    if not isinstance(system,str) or system not in VALID_SYSTEMS:return self.send(400,{'error':'invalid_system','allowed':sorted(VALID_SYSTEMS)})
    return self.send(200,diagnose(d['error'],system))
-  if self.path=='/v1/feedback':return self.send(404,{'error':'not_found'})
+  if self.path=='/v1/feedback':
+   if d.get('opt_in') is not True:return self.send(400,{'error':'explicit_opt_in_required'})
+   if any(k not in {'opt_in','category','outcome'} for k in d):return self.send(400,{'error':'unsupported_feedback_field'})
+   category=d.get('category','unknown');outcome=d.get('outcome','unsure')
+   if not isinstance(category,str) or category not in FEEDBACK_CATEGORIES:return self.send(400,{'error':'invalid_feedback_category','allowed':sorted(FEEDBACK_CATEGORIES)})
+   if not isinstance(outcome,str) or outcome not in FEEDBACK_OUTCOMES:return self.send(400,{'error':'invalid_feedback_outcome','allowed':sorted(FEEDBACK_OUTCOMES)})
+   os.makedirs('data',exist_ok=True)
+   with open('data/feedback.jsonl','a') as f:f.write(json.dumps({'category':d.get('category','unknown'),'outcome':d.get('outcome','unsure'),'at':int(time.time())})+'\n')
+   return self.send(201,{'accepted':True,'stored':['category','outcome','timestamp']})
   if self.path=='/mcp':
    origin=self.headers.get('Origin')
    if origin and origin not in ('http://'+self.headers.get('Host',''), 'https://'+self.headers.get('Host','')): return self.send(403,{'error':'origin_not_allowed'})
    return self.mcp(d)
   self.send(404,{'error':'not_found'})
  def mcp(self,d):
-  method=d.get('method');ident=d.get('id');params=d.get('params') or {}
+  method=d.get('method');ident=d.get('id');params=d.get('params',{})
   def result(value,status=200): self.send(status,{'jsonrpc':'2.0','id':ident,'result':value})
   def error(code,message,status=200,data=None):
    body={'jsonrpc':'2.0','id':ident,'error':{'code':code,'message':message}}
    if data is not None: body['error']['data']=data
    self.send(status,body)
-  if not isinstance(method,str) or not method:return error(-32600,'Invalid Request')
+  if d.get('jsonrpc')!='2.0' or not isinstance(method,str) or not method:return error(-32600,'Invalid Request')
   if params is None:params={}
   if not isinstance(params,dict):return error(-32602,'params must be an object')
   meta=params.get('_meta',{})
@@ -122,11 +160,11 @@ class H(BaseHTTPRequestHandler):
    if method=='tools/call' and self.headers.get('Mcp-Name') != params.get('name'):
     return error(-32020,'Header mismatch',400)
    if method=='server/discover':
-    return result({'resultType':'complete','supportedVersions':modern_versions,'capabilities':{'tools':{}},'_meta':{'io.modelcontextprotocol/serverInfo':{'name':'agentrescue','version':'0.1.0'}},'instructions':'Use diagnose_failure with a sanitized HTTP, API, or MCP error. Recommendations are advisory; high-risk actions require human review.','ttlMs':300000,'cacheScope':'public'})
+    return result({'resultType':'complete','supportedVersions':modern_versions,'capabilities':{'tools':{}},'_meta':{'io.modelcontextprotocol/serverInfo':{'name':'agentrescue','version':'0.2.0'}},'instructions':'Use diagnose_failure with a sanitized HTTP, API, or MCP error. Recommendations are advisory; high-risk actions require human review.','ttlMs':300000,'cacheScope':'public'})
   elif method=='initialize':
    req=(params.get('protocolVersion') or '2025-03-26')
    chosen=req if req in legacy_versions else '2025-11-25'
-   return result({'protocolVersion':chosen,'capabilities':{'tools':{}},'serverInfo':{'name':'agentrescue','version':'0.1.0'}})
+   return result({'protocolVersion':chosen,'capabilities':{'tools':{}},'serverInfo':{'name':'agentrescue','version':'0.2.0'}})
   elif method=='server/discover':
    # Discovery must be called using modern metadata; legacy clients receive a clear error.
    return error(-32602,'server/discover requires protocol version metadata')
@@ -147,4 +185,8 @@ class H(BaseHTTPRequestHandler):
    diagnosis=diagnose(err,system)
    return result({'resultType':'complete','content':[{'type':'text','text':json.dumps(diagnosis)}],'structuredContent':diagnosis,'isError':False})
   return error(-32601,'Method not found',404 if modern else 200)
-if __name__=='__main__':HTTPServer((os.getenv('HOST','127.0.0.1'),int(os.getenv('PORT','8000'))),H).serve_forever()
+class SafeHTTPServer(ThreadingHTTPServer):
+ daemon_threads=True
+ def get_request(self):
+  request,client=self.socket.accept();request.settimeout(10);return request,client
+if __name__=='__main__':SafeHTTPServer((os.getenv('HOST','127.0.0.1'),int(os.getenv('PORT','8000'))),H).serve_forever()

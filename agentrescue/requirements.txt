@@ -1,0 +1,4 @@
+mcp==1.30.0
+x402[evm]==2.25.0
+# A released universal wheel is available for this runtime; avoids source builds.
+cryptography==46.0.3
