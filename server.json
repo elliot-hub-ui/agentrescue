@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.elliot-hub-ui/agentrescue",
+  "title": "AgentRescue",
+  "description": "MCP diagnostics that help AI agents find safe next steps for HTTP, API, and MCP failures.",
+  "version": "0.1.0",
+  "websiteUrl": "https://agentrescue-mcp.onrender.com/",
+  "repository": {
+    "url": "https://github.com/elliot-hub-ui/agentrescue",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://agentrescue-mcp.onrender.com/mcp"
+    }
+  ]
+}
