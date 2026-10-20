@@ -69,3 +69,12 @@ Illustrative labor model: 6.7 minutes/account/month plus 240 fixed maintenance m
 - At a $0.01 trial price, a 16 KB response cap implies about **$0.0000024** marginal overage per maximum-size diagnosis. Bandwidth is not the current profitability constraint.
 - The approximately **$7/month** service compute floor needs about **700 paid calls/month** just to match hosting gross revenue, before facilitator/payment charges, taxes, acquisition, and support. Facilitator pricing and real paid demand remain unverified, so profitability has not been demonstrated.
 - Next gate: publish/enable paid service only after the receiving address, facilitator terms and credentials, transaction reconciliation, and a real external agent trial are verified. Keep payment disabled until that gate is approved.
+
+
+## Competitor reality check — 2026-10-20
+
+- [x402 Doctor](https://github.com/Fizzl13/x402-doctor) sells an agent-callable $0.01 x402 diagnosis with an MCP interface, but its diagnosis checks a live endpoint's payment challenge, payment options, Bazaar discovery, and wallet compatibility. It also offers a free web diagnosis. This is directly adjacent to AgentRescue's current paid price and stronger for x402 failures.
+- [Snapback](https://snapback.sh/) targets broader agent-run diagnosis, with trace-level context and concrete fixes. Its [published pricing](https://snapback.sh/pricing) offers 2,000 free diagnoses per month, Pro at $29/month, and pay-as-you-go at about $0.0032 per diagnosis.
+- AgentRescue's current service is narrower: a deterministic phrase classifier over one submitted error string, backed by 20 synthetic classification cases. It does not inspect a live endpoint, agent trace, or whether its advice resolved the task. At $0.01, its value is not yet differentiated against those offers.
+- **Commercial implication:** do not treat the $0.01 price as validated or spend on acquisition yet. Keep the paid call as a willingness-to-pay test only. The next product gate is a narrow result that alternatives do not already provide, then independent agent runs measuring successful task recovery and time saved. Stop or pivot if agents do not use it after discovery.
+- **Economics implication:** the current monthly loss remains approximately $7 while paid revenue is zero. Even if bandwidth stays negligible, a price several times above Snapback's published pay-as-you-go benchmark is hard to defend without a clear outcome advantage. This is a pricing/value signal, not proof that Snapback's listed service quality has been independently audited.
