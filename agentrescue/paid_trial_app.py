@@ -13,6 +13,7 @@ import re
 import time
 from collections import deque
 from threading import Lock
+from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -56,7 +57,37 @@ def payment_settings(env: dict[str, str] | None = None) -> dict[str, str] | None
     pay_to = env.get("AGENTRESCUE_X402_PAY_TO", "").strip()
     if not re.fullmatch(r"0x[a-fA-F0-9]{40}", pay_to) or pay_to.lower() == "0x" + "0" * 40:
         raise RuntimeError("Enabled x402 mode requires a non-zero EVM receiving address")
-    return {"network": network, "pay_to": pay_to, "mode": "testnet" if test_mode else "mainnet"}
+    facilitator_url = env.get("AGENTRESCUE_X402_FACILITATOR", "").strip()
+    if test_mode:
+        facilitator_url = facilitator_url or "https://x402.org/facilitator"
+        parsed = urlparse(facilitator_url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "x402.org"
+            or parsed.path.rstrip("/") != "/facilitator"
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise RuntimeError("Test mode only permits the HTTPS x402.org facilitator")
+    else:
+        if env.get("AGENTRESCUE_X402_PRODUCTION_APPROVED", "").strip() != "1":
+            raise RuntimeError("Base mainnet payments require AGENTRESCUE_X402_PRODUCTION_APPROVED=1")
+        if not facilitator_url:
+            raise RuntimeError("Base mainnet payments require an explicitly selected facilitator")
+        parsed = urlparse(facilitator_url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise RuntimeError("Production facilitator must be a clean HTTPS URL without embedded credentials or query data")
+        if parsed.hostname.lower() == "x402.org" and parsed.path.rstrip("/") == "/facilitator":
+            raise RuntimeError("The public x402.org facilitator is reserved here for testnet use")
+
+    return {
+        "network": network,
+        "pay_to": pay_to,
+        "mode": "testnet" if test_mode else "mainnet",
+        "facilitator_url": facilitator_url,
+    }
 
 
 def payment_resource_config(settings: dict[str, str]):
@@ -319,10 +350,9 @@ async def _configure_tool() -> None:
             from x402.mechanisms.evm.exact import ExactEvmServerScheme
             from x402.schemas import ResourceInfo
 
-            facilitator_url = os.getenv("AGENTRESCUE_X402_FACILITATOR", "https://x402.org/facilitator").strip()
-            if facilitator_url not in {"https://x402.org/facilitator"}:
-                raise RuntimeError("The paid trial only permits the reviewed x402.org facilitator")
-            resource_server = x402ResourceServer(HTTPFacilitatorClient(FacilitatorConfig(url=facilitator_url)))
+            resource_server = x402ResourceServer(
+                HTTPFacilitatorClient(FacilitatorConfig(url=settings["facilitator_url"]))
+            )
             resource_server.register(settings["network"], ExactEvmServerScheme())
             resource_server.initialize()
             accepts = resource_server.build_payment_requirements(
