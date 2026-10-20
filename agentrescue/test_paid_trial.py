@@ -1,13 +1,18 @@
+import importlib.util
 import json
 import unittest
 from unittest import mock
 
+from starlette.applications import Starlette
+from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from paid_trial_app import (
     MAINNET,
     TESTNET,
     app,
+    diagnose_http,
+    http_payment_middleware,
     http_payment_routes,
     payment_resource_config,
     payment_settings,
@@ -127,6 +132,48 @@ class PaidTrialConfigTests(unittest.TestCase):
         self.assertEqual(bazaar["info"]["input"]["bodyType"], "json")
         self.assertEqual(bazaar["info"]["input"]["body"]["error"], "HTTP 429 rate limit")
         self.assertIn("output", bazaar["info"])
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("fastapi"),
+        "FastAPI is a pinned dependency of the paid HTTP middleware and is installed in CI",
+    )
+    def test_unpaid_http_diagnosis_returns_402_with_bazaar_metadata_without_running_diagnosis(self):
+        from x402.http import decode_payment_required_header
+        from x402.schemas import SupportedKind, SupportedResponse
+
+        settings = {
+            "network": TESTNET,
+            "pay_to": "0x1111111111111111111111111111111111111111",
+            "mode": "testnet",
+            "facilitator_url": "https://x402.org/facilitator",
+        }
+
+        class FakeFacilitator:
+            def __init__(self, config):
+                self.config = config
+
+            def get_supported(self):
+                return SupportedResponse(kinds=[
+                    SupportedKind(x402_version=2, scheme="exact", network=TESTNET)
+                ])
+
+        with mock.patch("x402.http.HTTPFacilitatorClient", FakeFacilitator):
+            payment_middleware = http_payment_middleware(settings)
+            paid_app = Starlette(
+                routes=[Route("/v1/diagnose", diagnose_http, methods=["POST"])],
+                middleware=[payment_middleware],
+            )
+            with mock.patch("paid_trial_app.diagnose", side_effect=AssertionError("diagnosis must wait for payment")):
+                response = TestClient(paid_app).post(
+                    "/v1/diagnose", json={"error": "HTTP 429 rate limit"}
+                )
+
+        self.assertEqual(response.status_code, 402, response.text)
+        self.assertIn("PAYMENT-REQUIRED", response.headers)
+        required = decode_payment_required_header(response.headers["PAYMENT-REQUIRED"])
+        self.assertIn("bazaar", required.extensions)
+        self.assertEqual(required.accepts[0].network, TESTNET)
+        self.assertEqual(required.accepts[0].amount, "10000")
 
     def test_http_diagnosis_is_free_when_payments_are_disabled_and_does_not_echo_input(self):
         error = "HTTP 429 rate limit with token=sk_live_abcdefghijklmnop123456"
