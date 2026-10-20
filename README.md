@@ -18,4 +18,4 @@ At a maximum 16 KB response, marginal public egress at Render's documented $0.15
 
 The Render service uses one 0.5 CPU / 512 MB instance at about $7/month compute. It therefore needs roughly **700 successful paid calls just to cover compute**, before other costs. The 5 GB Hobby bandwidth allowance is shared across workspace services; review actual workspace billing and keep total spend under the approved $40 ceiling. A single Render metrics sample on 2026-10-20 was 0.0087 MB; no production payments or customer use have been observed.
 
-See `venture/economics.md` and `venture/acceptance.md` for assumptions, limits, and current validation status.
+See [agentrescue/README.md](agentrescue/README.md), the [synthetic benchmark](venture/benchmark.json), and [GitHub Actions](https://github.com/elliot-hub-ui/agentrescue/actions) for implementation and verification details.
