@@ -142,9 +142,11 @@ class X402PaymentWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.settle_calls, 0)
         self.assertTrue(result.isError)
         self.assertIn("Payment Required", result.content[0].text)
-        self.assertIsNotNone(server.payment_required_extensions)
-        self.assertIn("bazaar", server.payment_required_extensions)
-        discovery = server.payment_required_extensions["bazaar"]["info"]["input"]
+        payment_required = result.structuredContent
+        self.assertIsInstance(payment_required, dict)
+        self.assertIn("extensions", payment_required)
+        self.assertIn("bazaar", payment_required["extensions"])
+        discovery = payment_required["extensions"]["bazaar"]["info"]["input"]
         self.assertEqual(discovery["type"], "mcp")
         self.assertEqual(discovery["toolName"], "diagnose_failure")
         self.assertEqual(discovery["transport"], "streamable-http")
