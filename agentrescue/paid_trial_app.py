@@ -6,6 +6,7 @@ production mode accepts Base mainnet only. Both modes charge exactly $0.01.
 from __future__ import annotations
 
 import asyncio
+import copy
 import contextlib
 import json
 import os
@@ -23,7 +24,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 
-from app import MAX_DIAGNOSIS_CHARS, diagnose
+from app import MAX_DIAGNOSIS_CHARS, SCHEMA, diagnose
 
 PRICE = "$0.01"
 MAINNET = "eip155:8453"
@@ -101,6 +102,68 @@ def payment_resource_config(settings: dict[str, str]):
         price=PRICE,
         extra={"name": "USDC", "version": "2"},
     )
+
+
+def http_payment_routes(settings: dict[str, str]) -> dict[str, dict]:
+    """Build the single paid HTTP route and its Bazaar JSON discovery schema."""
+    from x402.extensions.bazaar import OutputConfig, declare_discovery_extension
+
+    request_schema = {
+        "type": "object",
+        "properties": {
+            "error": {"type": "string", "minLength": 1, "maxLength": MAX_DIAGNOSIS_CHARS},
+            "system": {"type": "string", "enum": ["http", "api", "mcp"], "default": "http"},
+        },
+        "required": ["error"],
+        "additionalProperties": False,
+    }
+    discovery = declare_discovery_extension(
+        input={"error": "HTTP 429 rate limit", "system": "http"},
+        input_schema=request_schema,
+        body_type="json",
+        output=OutputConfig(
+            example={
+                "system": "http",
+                "category": "rate_limit",
+                "summary": "Matched a rate limit failure indicator.",
+                "confidence": "medium",
+                "recovery": {"guidance": "Honor Retry-After and reduce concurrency.", "risk": "low"},
+            },
+            schema={"type": "object", "properties": {"category": {"type": "string"}}},
+        ),
+    )
+    routes = {
+        "POST /v1/diagnose": {
+            "accepts": {
+                "scheme": "exact",
+                "payTo": settings["pay_to"],
+                "price": PRICE,
+                "network": settings["network"],
+                "extra": {"name": "USDC", "version": "2"},
+            },
+            "resource": "https://agentrescue-mcp.onrender.com/v1/diagnose",
+            "description": "Diagnose a sanitized HTTP, API, or MCP failure and return read-only recovery guidance.",
+            "mimeType": "application/json",
+            "service_name": "AgentRescue",
+            "tags": ["diagnostics", "agents"],
+            "extensions": discovery,
+        }
+    }
+    return routes
+
+
+def http_payment_middleware(settings: dict[str, str]):
+    """Build the SDK middleware for the paid HTTP diagnosis route."""
+    from x402 import x402ResourceServer
+    from x402.http import FacilitatorConfig, HTTPFacilitatorClient
+    from x402.http.middleware.fastapi import PaymentMiddlewareASGI
+    from x402.mechanisms.evm.exact import ExactEvmServerScheme
+
+    server = x402ResourceServer(
+        HTTPFacilitatorClient(FacilitatorConfig(url=settings["facilitator_url"]))
+    )
+    server.register(settings["network"], ExactEvmServerScheme())
+    return Middleware(PaymentMiddlewareASGI, routes=http_payment_routes(settings), server=server)
 
 
 def payment_discovery_extension():
@@ -425,6 +488,7 @@ async def llms(request: Request):
     price = "Diagnosis calls cost exactly $0.01 USDC through x402." if mode else "The x402 paid trial is currently disabled; no diagnosis payments are collected."
     content = (
         "# AgentRescue\n\n"
+        "HTTP API: POST /v1/diagnose with a JSON error and optional system (http, api, or mcp).\n"
         "MCP endpoint: /mcp (Streamable HTTP). Discover tools freely with tools/list.\n"
         "Call diagnose_failure with a sanitized HTTP, API, or MCP error. Advice is read-only.\n"
         f"{price}\n"
@@ -432,6 +496,57 @@ async def llms(request: Request):
         "Do not send secrets or personal data.\n"
     )
     return PlainTextResponse(content)
+
+
+async def openapi(request: Request):
+    schema = copy.deepcopy(SCHEMA)
+    schema["info"]["description"] = (
+        "Rule-based, advisory HTTP/API/MCP failure diagnosis. Fixes are never executed. "
+        "When x402 is enabled, POST /v1/diagnose requires $0.01 USDC."
+    )
+    diagnosis = schema["components"]["schemas"]["Diagnosis"]
+    diagnosis["properties"]["payment"] = {
+        "type": "object",
+        "properties": {
+            "mode": {"type": "string", "enum": ["disabled", "x402-testnet", "x402-mainnet"]},
+            "price_usd": {"type": "string", "enum": ["0.00", "0.01"]},
+        },
+        "required": ["mode", "price_usd"],
+    }
+    diagnose_post = schema["paths"]["/v1/diagnose"]["post"]
+    if payment_settings():
+        diagnose_post["responses"]["402"] = {
+            "description": "x402 payment required; includes the accepted payment requirements."
+        }
+    return JSONResponse(schema)
+
+
+async def diagnose_http(request: Request):
+    """Validate a bounded HTTP request and return the shared safe diagnosis."""
+    try:
+        payload = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "json_object_required"}, status_code=400)
+    if set(payload) - {"error", "system"}:
+        return JSONResponse({"error": "unsupported_field"}, status_code=400)
+    error = payload.get("error")
+    if not isinstance(error, str) or not error.strip():
+        return JSONResponse({"error": "error_required"}, status_code=400)
+    if len(error) > MAX_DIAGNOSIS_CHARS:
+        return JSONResponse({"error": "diagnostic_too_large", "max_chars": MAX_DIAGNOSIS_CHARS}, status_code=413)
+    system = payload.get("system", "http")
+    if not isinstance(system, str) or system not in {"http", "api", "mcp"}:
+        return JSONResponse({"error": "invalid_system", "allowed": ["api", "http", "mcp"]}, status_code=400)
+
+    settings = payment_settings()
+    result = diagnose(error, system)
+    result["payment"] = {
+        "mode": "x402-" + settings["mode"] if settings else "disabled",
+        "price_usd": "0.01" if settings else "0.00",
+    }
+    return JSONResponse(result)
 
 
 async def home(request: Request):
@@ -442,7 +557,7 @@ async def home(request: Request):
         "<title>AgentRescue</title><main><h1>Safer next steps for failing agents.</h1>"
         "<p>AgentRescue returns bounded, structured recovery guidance for HTTP, API, and MCP failures."
         " It never executes fixes.</p><p>" + status + "</p>"
-        "<p>Agents: connect to <code>/mcp</code>. Discovery and tool listing are free.</p>"
+        "<p>Agents: POST a sanitized JSON error to <code>/v1/diagnose</code> or connect to <code>/mcp</code>. Discovery and tool listing are free.</p>"
         "<p>Send only synthetic or sanitized errors; secret redaction is best-effort.</p></main></html>"
     )
     return HTMLResponse(html)
@@ -460,10 +575,18 @@ app = Starlette(
     routes=[
         Route("/health", health, methods=["GET"]),
         Route("/llms.txt", llms, methods=["GET"]),
+        Route("/openapi.json", openapi, methods=["GET"]),
         Route("/", home, methods=["GET"]),
+        Route("/v1/diagnose", diagnose_http, methods=["POST"]),
         McpPostRoute(mcp_app),
         Mount("/", app=mcp_app),
     ],
     middleware=[Middleware(McpTrafficBounds)],
     lifespan=lifespan,
 )
+
+_http_payment_settings = payment_settings()
+if _http_payment_settings:
+    # The SDK protects only HTTP diagnosis calls; health, MCP discovery, and tool listing stay free.
+    _http_middleware = http_payment_middleware(_http_payment_settings)
+    app.add_middleware(_http_middleware.cls, **_http_middleware.kwargs)
