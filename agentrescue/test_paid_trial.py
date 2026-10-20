@@ -4,7 +4,14 @@ from unittest import mock
 
 from starlette.testclient import TestClient
 
-from paid_trial_app import MAINNET, TESTNET, app, payment_resource_config, payment_settings
+from paid_trial_app import (
+    MAINNET,
+    TESTNET,
+    app,
+    http_payment_routes,
+    payment_resource_config,
+    payment_settings,
+)
 
 
 class PaidTrialConfigTests(unittest.TestCase):
@@ -105,6 +112,61 @@ class PaidTrialConfigTests(unittest.TestCase):
         self.assertEqual(config.pay_to, settings["pay_to"])
         self.assertEqual(config.price, "$0.01")
         self.assertEqual(config.extra, {"name": "USDC", "version": "2"})
+
+    def test_http_bazaar_route_declares_json_input_and_fixed_price(self):
+        settings = {
+            "network": TESTNET,
+            "pay_to": "0x1111111111111111111111111111111111111111",
+            "mode": "testnet",
+            "facilitator_url": "https://x402.org/facilitator",
+        }
+        route = http_payment_routes(settings)["POST /v1/diagnose"]
+        self.assertEqual(route["accepts"]["price"], "$0.01")
+        self.assertEqual(route["accepts"]["network"], TESTNET)
+        bazaar = route["extensions"]["bazaar"]
+        self.assertEqual(bazaar["info"]["input"]["bodyType"], "json")
+        self.assertEqual(bazaar["info"]["input"]["body"]["error"], "HTTP 429 rate limit")
+        self.assertIn("output", bazaar["info"])
+
+    def test_http_diagnosis_is_free_when_payments_are_disabled_and_does_not_echo_input(self):
+        error = "HTTP 429 rate limit with token=sk_live_abcdefghijklmnop123456"
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
+            response = TestClient(app, base_url="http://agentrescue-mcp.onrender.com").post(
+                "/v1/diagnose", json={"error": error}
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        diagnosis = response.json()
+        self.assertEqual(diagnosis["category"], "rate_limit")
+        self.assertEqual(diagnosis["payment"], {"mode": "disabled", "price_usd": "0.00"})
+        self.assertNotIn("sk_live_abcdefghijklmnop123456", response.text)
+
+    def test_http_diagnosis_rejects_invalid_and_oversized_requests(self):
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
+            client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+            invalid_json = client.post("/v1/diagnose", content="{")
+            extra_field = client.post("/v1/diagnose", json={"error": "HTTP 429", "secret": "x"})
+            invalid_system = client.post("/v1/diagnose", json={"error": "HTTP 429", "system": "shell"})
+            too_long = client.post("/v1/diagnose", json={"error": "x" * 8001})
+        self.assertEqual(invalid_json.status_code, 400)
+        self.assertEqual(extra_field.status_code, 400)
+        self.assertEqual(invalid_system.status_code, 400)
+        self.assertEqual(too_long.status_code, 413)
+
+    def test_openapi_documents_http_payment_boundary_and_402_when_enabled(self):
+        client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
+            free_schema = client.get("/openapi.json").json()
+        payment_schema = free_schema["components"]["schemas"]["Diagnosis"]["properties"]["payment"]
+        self.assertEqual(payment_schema["properties"]["mode"]["enum"][0], "disabled")
+
+        with mock.patch.dict("os.environ", {
+            "AGENTRESCUE_X402_ENABLED": "1",
+            "AGENTRESCUE_X402_TEST_MODE": "1",
+            "AGENTRESCUE_X402_NETWORK": TESTNET,
+            "AGENTRESCUE_X402_PAY_TO": "0x1111111111111111111111111111111111111111",
+        }, clear=False):
+            paid_schema = client.get("/openapi.json").json()
+        self.assertIn("402", paid_schema["paths"]["/v1/diagnose"]["post"]["responses"])
 
     def test_mcp_lists_tool_for_free_then_returns_no_charge_diagnosis(self):
         headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
