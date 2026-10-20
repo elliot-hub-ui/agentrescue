@@ -4,7 +4,7 @@ from unittest import mock
 
 from starlette.testclient import TestClient
 
-from paid_trial_app import MAINNET, TESTNET, app, payment_settings
+from paid_trial_app import MAINNET, TESTNET, app, payment_resource_config, payment_settings
 
 
 class PaidTrialConfigTests(unittest.TestCase):
@@ -56,6 +56,17 @@ class PaidTrialConfigTests(unittest.TestCase):
                     "AGENTRESCUE_X402_NETWORK": MAINNET,
                     "AGENTRESCUE_X402_PAY_TO": address,
                 })
+
+    def test_payment_resource_config_matches_pinned_x402_sdk_schema(self):
+        settings = {
+            "network": MAINNET,
+            "pay_to": "0x1111111111111111111111111111111111111111",
+        }
+        config = payment_resource_config(settings)
+        self.assertEqual(config.network, MAINNET)
+        self.assertEqual(config.pay_to, settings["pay_to"])
+        self.assertEqual(config.price, "$0.01")
+        self.assertEqual(config.extra, {"name": "USDC", "version": "2"})
 
     def test_mcp_lists_tool_for_free_then_returns_no_charge_diagnosis(self):
         headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
