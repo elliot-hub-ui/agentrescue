@@ -21,6 +21,7 @@ except ModuleNotFoundError as exc:
     ) from exc
 
 from app import diagnose
+from paid_trial_app import payment_discovery_extension
 
 
 NETWORK = "eip155:84532"
@@ -33,6 +34,7 @@ class FakeResourceServer:
 
     def __init__(self, settlement_success):
         self.settlement_success = settlement_success
+        self.payment_required_extensions = None
         self.accepts = [PaymentRequirements(
             scheme="exact",
             network=NETWORK,
@@ -45,8 +47,9 @@ class FakeResourceServer:
         self.verify_calls = 0
         self.settle_calls = 0
 
-    def create_payment_required_response(self, accepts, resource, *_args, **_kwargs):
-        return PaymentRequired(accepts=accepts, resource=resource)
+    def create_payment_required_response(self, accepts, resource, _payload=None, extensions=None):
+        self.payment_required_extensions = extensions
+        return PaymentRequired(accepts=accepts, resource=resource, extensions=extensions)
 
     def find_matching_requirements(self, accepts, payload):
         return accepts[0]
@@ -92,6 +95,7 @@ class X402PaymentWrapperTests(unittest.IsolatedAsyncioTestCase):
                 description="Synthetic paid-diagnosis test",
                 mime_type="application/json",
             ),
+            extensions=payment_discovery_extension(),
         )(diagnose_failure)
         return wrapped, handler_calls
 
@@ -138,6 +142,16 @@ class X402PaymentWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.settle_calls, 0)
         self.assertTrue(result.isError)
         self.assertIn("Payment Required", result.content[0].text)
+        payment_required = result.structuredContent
+        self.assertIsInstance(payment_required, dict)
+        self.assertIn("extensions", payment_required)
+        self.assertIn("bazaar", payment_required["extensions"])
+        discovery = payment_required["extensions"]["bazaar"]["info"]["input"]
+        self.assertEqual(discovery["type"], "mcp")
+        self.assertEqual(discovery["toolName"], "diagnose_failure")
+        self.assertEqual(discovery["transport"], "streamable-http")
+        error_schema = discovery["inputSchema"]["properties"]["error"]
+        self.assertEqual(error_schema["maxLength"], 8000)
 
 
 if __name__ == "__main__":
