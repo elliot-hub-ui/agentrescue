@@ -66,7 +66,7 @@ def diagnose(error,system='http'):
  s=R.sub('[REDACTED]',str(error)[:MAX_DIAGNOSIS_CHARS]);q=next((r for r in RULES if _has_signal(r[0],s)),None)
  if q:
   sig,cat,advice,risk=q;confidence='medium';basis='A deterministic rule matched a known error phrase; this is not a calibrated probability.'
-  summary=f"Matched a {cat.replace('_',' ')} failure indicator. Confirm it applies to the latest failing request."
+  summary=f"A known error signal was classified as \'{cat.replace('_',' ')}\'. Confirm it applies to the latest failing request."
  else:
   sig,cat,advice,risk,confidence,basis='','unknown','Capture a sanitized trace, timestamp and request ID; compare with a known-good run.','medium','low','No known error phrase matched; gather more evidence before acting.'
   summary='No supported failure indicator matched. Gather a sanitized trace and compare with a known-good result.'
