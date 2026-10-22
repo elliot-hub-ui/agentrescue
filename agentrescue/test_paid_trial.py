@@ -132,6 +132,24 @@ class PaidTrialConfigTests(unittest.TestCase):
         self.assertEqual(bazaar["info"]["input"]["bodyType"], "json")
         self.assertEqual(bazaar["info"]["input"]["body"]["error"], "HTTP 429 rate limit")
         self.assertIn("output", bazaar["info"])
+        output = bazaar["info"]["output"]
+        self.assertEqual(output["example"]["payment"], {
+            "mode": "x402-testnet",
+            "price_usd": "0.01",
+        })
+        self.assertIn("confidence_basis", output["schema"]["properties"])
+        self.assertIn("evidence", output["schema"]["properties"])
+        self.assertEqual(
+            set(output["schema"]["required"]),
+            {
+                "system", "category", "summary", "confidence", "confidence_basis",
+                "recovery", "evidence", "payment",
+            },
+        )
+        self.assertEqual(
+            output["schema"]["properties"]["payment"]["properties"]["mode"]["enum"],
+            ["x402-testnet", "x402-mainnet"],
+        )
 
     @unittest.skipUnless(
         importlib.util.find_spec("fastapi"),
