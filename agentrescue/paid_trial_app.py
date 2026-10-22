@@ -117,6 +117,16 @@ def http_payment_routes(settings: dict[str, str]) -> dict[str, dict]:
         "required": ["error"],
         "additionalProperties": False,
     }
+    output_schema = copy.deepcopy(SCHEMA["components"]["schemas"]["Diagnosis"])
+    output_schema["properties"]["payment"] = {
+        "type": "object",
+        "properties": {
+            "mode": {"type": "string", "enum": ["x402-testnet", "x402-mainnet"]},
+            "price_usd": {"type": "string", "const": "0.01"},
+        },
+        "required": ["mode", "price_usd"],
+        "additionalProperties": False,
+    }
     discovery = declare_discovery_extension(
         input={"error": "HTTP 429 rate limit", "system": "http"},
         input_schema=request_schema,
@@ -125,11 +135,22 @@ def http_payment_routes(settings: dict[str, str]) -> dict[str, dict]:
             example={
                 "system": "http",
                 "category": "rate_limit",
-                "summary": "Matched a rate limit failure indicator.",
+                "summary": "Matched a rate limit failure indicator. Confirm it applies to the latest failing request.",
                 "confidence": "medium",
-                "recovery": {"guidance": "Honor Retry-After and reduce concurrency.", "risk": "low"},
+                "confidence_basis": "A deterministic rule matched a known error phrase; this is not a calibrated probability.",
+                "recovery": {
+                    "guidance": "Honor Retry-After; reduce concurrency and use bounded jittered backoff.",
+                    "risk": "low",
+                    "requires_human_approval": False,
+                    "execute_automatically": False,
+                },
+                "evidence": {"signals": ["429"], "redacted": False},
+                "payment": {
+                    "mode": "x402-" + settings["mode"],
+                    "price_usd": "0.01",
+                },
             },
-            schema={"type": "object", "properties": {"category": {"type": "string"}}},
+            schema=output_schema,
         ),
     )
     routes = {
