@@ -137,17 +137,18 @@ class PaidTrialConfigTests(unittest.TestCase):
             "mode": "x402-testnet",
             "price_usd": "0.01",
         })
-        self.assertIn("confidence_basis", output["schema"]["properties"])
-        self.assertIn("evidence", output["schema"]["properties"])
+        output_schema = bazaar["schema"]["properties"]["output"]["properties"]["example"]
+        self.assertIn("confidence_basis", output_schema["properties"])
+        self.assertIn("evidence", output_schema["properties"])
         self.assertEqual(
-            set(output["schema"]["required"]),
+            set(output_schema["required"]),
             {
                 "system", "category", "summary", "confidence", "confidence_basis",
                 "recovery", "evidence", "payment",
             },
         )
         self.assertEqual(
-            output["schema"]["properties"]["payment"]["properties"]["mode"]["enum"],
+            output_schema["properties"]["payment"]["properties"]["mode"]["enum"],
             ["x402-testnet", "x402-mainnet"],
         )
 
