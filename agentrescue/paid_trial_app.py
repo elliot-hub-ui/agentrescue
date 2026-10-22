@@ -27,6 +27,7 @@ from starlette.routing import Mount, Route
 from app import MAX_DIAGNOSIS_CHARS, SCHEMA, diagnose
 
 PRICE = "$0.01"
+PUBLIC_BASE_URL = "https://agentrescue-mcp.onrender.com"
 MAINNET = "eip155:8453"
 TESTNET = "eip155:84532"
 MAX_REQUEST_BYTES = 16_000
@@ -162,7 +163,7 @@ def http_payment_routes(settings: dict[str, str]) -> dict[str, dict]:
                 "network": settings["network"],
                 "extra": {"name": "USDC", "version": "2"},
             },
-            "resource": "https://agentrescue-mcp.onrender.com/v1/diagnose",
+            "resource": PUBLIC_BASE_URL + "/v1/diagnose",
             "description": "Diagnose a sanitized HTTP, API, or MCP failure and return read-only recovery guidance.",
             "mimeType": "application/json",
             "service_name": "AgentRescue",
@@ -509,8 +510,9 @@ async def llms(request: Request):
     price = "Diagnosis calls cost exactly $0.01 USDC through x402." if mode else "The x402 paid trial is currently disabled; no diagnosis payments are collected."
     content = (
         "# AgentRescue\n\n"
-        "HTTP API: POST /v1/diagnose with a JSON error and optional system (http, api, or mcp).\n"
-        "MCP endpoint: /mcp (Streamable HTTP). Discover tools freely with tools/list.\n"
+        f"HTTP API: POST {PUBLIC_BASE_URL}/v1/diagnose with a JSON error and optional system (http, api, or mcp).\n"
+        f"MCP endpoint: {PUBLIC_BASE_URL}/mcp (Streamable HTTP). Discover tools freely with tools/list.\n"
+        f"OpenAPI: {PUBLIC_BASE_URL}/openapi.json.\n"
         "Call diagnose_failure with a sanitized HTTP, API, or MCP error. Advice is read-only.\n"
         f"{price}\n"
         "Requests are limited to 60 GET and 20 POST per minute per instance; request and response bodies are capped at 16 KB.\n"
@@ -521,6 +523,7 @@ async def llms(request: Request):
 
 async def openapi(request: Request):
     schema = copy.deepcopy(SCHEMA)
+    schema["servers"] = [{"url": PUBLIC_BASE_URL}]
     schema["info"]["description"] = (
         "Rule-based, advisory HTTP/API/MCP failure diagnosis. Fixes are never executed. "
         "When x402 is enabled, POST /v1/diagnose requires $0.01 USDC."
@@ -578,7 +581,7 @@ async def home(request: Request):
         "<title>AgentRescue</title><main><h1>Safer next steps for failing agents.</h1>"
         "<p>AgentRescue returns bounded, structured recovery guidance for HTTP, API, and MCP failures."
         " It never executes fixes.</p><p>" + status + "</p>"
-        "<p>Agents: POST a sanitized JSON error to <code>/v1/diagnose</code> or connect to <code>/mcp</code>. Discovery and tool listing are free.</p>"
+        f"<p>Agents: POST a sanitized JSON error to <code>{PUBLIC_BASE_URL}/v1/diagnose</code> or connect to <code>{PUBLIC_BASE_URL}/mcp</code>. <a href='/llms.txt'>Agent guide</a> · <a href='/openapi.json'>OpenAPI</a>. Discovery and tool listing are free.</p>"
         "<p>Send only synthetic or sanitized errors; secret redaction is best-effort.</p></main></html>"
     )
     return HTMLResponse(html)
