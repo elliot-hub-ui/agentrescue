@@ -599,7 +599,7 @@ async def feedback(request: Request):
     path = os.environ.get("AGENTRESCUE_FEEDBACK_PATH", "data/feedback.jsonl")
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "a", encoding="utf-8") as stream:
-        stream.write(json.dumps({"category": category, "outcome": outcome, "at": int(time.time())}) + "\\n")
+        stream.write(json.dumps({"category": category, "outcome": outcome, "at": int(time.time())}) + "\n")
     return JSONResponse({"accepted": True, "stored": ["category", "outcome", "timestamp"]}, status_code=201)
 
 
