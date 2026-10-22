@@ -53,7 +53,7 @@ def _has_signal(signal,text):
   if not matches:
    if text.strip()==signal:return True
    return signal=='429' and bool(re.search(r'\brate[ -]?limit(?:ed| exceeded)?\b|too many requests',text,re.I))
-  success=list(re.finditer(r'\b(?:HTTP\s*|status(?:\s+code)?\s*[:=]?\s*|response(?:\s+status)?\s*[:=]?\s*|returned\s+|got\s+|health check(?:\s+is)?\s+)(2\d\d)\b',text,re.I))
+  success=list(re.finditer(r'\b(?:HTTP\s*|status(?:\s+code)?\s*[:=]?\s*|response(?:\s+status)?\s*[:=]?\s*|response\s+(?:was|returned)\s+|returned\s+|got\s+|health check(?:\s+is)?\s+)(2\d\d)\b',text,re.I))
   return not (success and success[-1].start()>matches[-1].start())
  if signal=='required':
   matches=list(re.finditer(r'\b(?:is|are|was|were)\s+required\b|\brequired\s+(?:field|parameter|argument)\b|\bmissing\s+(?:a\s+)?required\b',text,re.I))
