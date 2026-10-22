@@ -218,6 +218,22 @@ class PaidTrialConfigTests(unittest.TestCase):
         self.assertEqual(invalid_system.status_code, 400)
         self.assertEqual(too_long.status_code, 413)
 
+    def test_agent_setup_docs_expose_absolute_endpoints(self):
+        client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+        guide = client.get("/llms.txt").text
+        homepage = client.get("/").text
+        openapi = client.get("/openapi.json").json()
+
+        self.assertIn("https://agentrescue-mcp.onrender.com/mcp", guide)
+        self.assertIn("https://agentrescue-mcp.onrender.com/v1/diagnose", guide)
+        self.assertIn("https://agentrescue-mcp.onrender.com/openapi.json", guide)
+        self.assertIn("href='/llms.txt'", homepage)
+        self.assertIn("https://agentrescue-mcp.onrender.com/mcp", homepage)
+        self.assertEqual(
+            openapi["servers"],
+            [{"url": "https://agentrescue-mcp.onrender.com"}],
+        )
+
     def test_openapi_documents_http_payment_boundary_and_402_when_enabled(self):
         client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
         with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
