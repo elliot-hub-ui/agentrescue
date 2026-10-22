@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import unittest
+import tempfile
 from unittest import mock
 
 from starlette.applications import Starlette
@@ -329,6 +330,50 @@ class PaidTrialConfigTests(unittest.TestCase):
                 self.assertEqual(diagnosis["payment"]["mode"], "disabled")
                 rejected = client.get("/mcp", headers={"Host": "attacker.example"})
                 self.assertEqual(rejected.status_code, 421)
+
+
+    def test_feedback_is_disabled_by_default(self):
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_FEEDBACK_ENABLED": "0"}, clear=False):
+            with mock.patch("paid_trial_app._allow", return_value=True):
+                response = TestClient(app, base_url="http://agentrescue-mcp.onrender.com").post(
+                    "/v1/feedback", json={"opt_in": True, "category": "rate_limit"}
+                )
+        self.assertEqual(response.status_code, 404)
+
+    def test_feedback_requires_opt_in_rejects_raw_fields_and_stores_only_labels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            feedback_path = directory + "/feedback.jsonl"
+            env = {
+                "AGENTRESCUE_FEEDBACK_ENABLED": "1",
+                "AGENTRESCUE_FEEDBACK_PATH": feedback_path,
+            }
+            with mock.patch.dict("os.environ", env, clear=False):
+                with mock.patch("paid_trial_app._allow", return_value=True):
+                    client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+                    no_opt_in = client.post("/v1/feedback", json={"category": "rate_limit"})
+                    raw_text = client.post("/v1/feedback", json={
+                        "opt_in": True,
+                        "category": "rate_limit",
+                        "outcome": "resolved",
+                        "error": "token=sk_live_do_not_store_12345678",
+                    })
+                    invalid_category = client.post("/v1/feedback", json={
+                        "opt_in": True, "category": "raw diagnostic", "outcome": "resolved",
+                    })
+                    accepted = client.post("/v1/feedback", json={
+                        "opt_in": True, "category": "rate_limit", "outcome": "resolved",
+                    })
+
+            self.assertEqual(no_opt_in.status_code, 400)
+            self.assertEqual(raw_text.status_code, 400)
+            self.assertEqual(invalid_category.status_code, 400)
+            self.assertEqual(accepted.status_code, 201, accepted.text)
+            with open(feedback_path, encoding="utf-8") as stream:
+                stored = json.loads(stream.read())
+            self.assertEqual(set(stored), {"category", "outcome", "at"})
+            self.assertEqual(stored["category"], "rate_limit")
+            self.assertEqual(stored["outcome"], "resolved")
+            self.assertNotIn("sk_live_do_not_store_12345678", json.dumps(stored))
 
 
 if __name__ == "__main__":
