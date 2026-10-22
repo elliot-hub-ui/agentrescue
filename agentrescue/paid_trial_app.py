@@ -24,7 +24,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 
-from app import MAX_DIAGNOSIS_CHARS, SCHEMA, diagnose
+from app import FEEDBACK_CATEGORIES, FEEDBACK_OUTCOMES, MAX_DIAGNOSIS_CHARS, SCHEMA, diagnose
 
 PRICE = "$0.01"
 PUBLIC_BASE_URL = "https://agentrescue-mcp.onrender.com"
@@ -573,6 +573,36 @@ async def diagnose_http(request: Request):
     return JSONResponse(result)
 
 
+async def feedback(request: Request):
+    """Accept opted-in, category-only feedback when collection is explicitly enabled."""
+    if os.environ.get("AGENTRESCUE_FEEDBACK_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    try:
+        payload = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "json_object_required"}, status_code=400)
+    if payload.get("opt_in") is not True:
+        return JSONResponse({"error": "explicit_opt_in_required"}, status_code=400)
+    if set(payload) - {"opt_in", "category", "outcome"}:
+        return JSONResponse({"error": "unsupported_feedback_field"}, status_code=400)
+
+    category = payload.get("category", "unknown")
+    outcome = payload.get("outcome", "unsure")
+    if not isinstance(category, str) or category not in FEEDBACK_CATEGORIES:
+        return JSONResponse({"error": "invalid_feedback_category"}, status_code=400)
+    if not isinstance(outcome, str) or outcome not in FEEDBACK_OUTCOMES:
+        return JSONResponse({"error": "invalid_feedback_outcome"}, status_code=400)
+
+    # Store only minimized labels; never persist diagnostic text, identity, or request metadata.
+    path = os.environ.get("AGENTRESCUE_FEEDBACK_PATH", "data/feedback.jsonl")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"category": category, "outcome": outcome, "at": int(time.time())}) + "\\n")
+    return JSONResponse({"accepted": True, "stored": ["category", "outcome", "timestamp"]}, status_code=201)
+
+
 async def home(request: Request):
     mode = payment_settings()
     status = "Payment trial is active: each successful diagnosis costs $0.01 USDC." if mode else "The payment trial is not enabled; no diagnosis charges are collected."
@@ -602,6 +632,7 @@ app = Starlette(
         Route("/openapi.json", openapi, methods=["GET"]),
         Route("/", home, methods=["GET"]),
         Route("/v1/diagnose", diagnose_http, methods=["POST"]),
+        Route("/v1/feedback", feedback, methods=["POST"]),
         McpPostRoute(mcp_app),
         Mount("/", app=mcp_app),
     ],
