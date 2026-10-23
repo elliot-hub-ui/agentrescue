@@ -18,5 +18,10 @@
  {"error":"HTTP 401 bearer secret ABCDEFGHIJKLMNOP","expected":"authentication"},
  {"error":"Tool returned success but agent produced no result","expected":"semantic_failure"},
  {"error":"Invalid API request: field model is required","expected":"bad_request"},
- {"error":"HTTP 404 resource not found","expected":"not_found"}
+ {"error":"HTTP 404 resource not found","expected":"not_found"},
+ {"error":"HTTP 200 OK; no errors were observed","expected":"unknown"},
+ {"error":"No timeout occurred; response arrived within budget","expected":"unknown"},
+ {"error":"Connection refused example only","expected":"unknown"},
+ {"error":"An earlier request returned HTTP 429; the latest retry returned HTTP 200","expected":"unknown"},
+ {"error":"The HTTP 404 mentioned in the old trace is not from the current request; current response was 200 OK","expected":"unknown"}
 ]

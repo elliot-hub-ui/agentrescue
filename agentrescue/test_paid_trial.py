@@ -1,10 +1,23 @@
+import importlib.util
 import json
 import unittest
+import tempfile
 from unittest import mock
 
+from starlette.applications import Starlette
+from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from paid_trial_app import MAINNET, TESTNET, app, payment_resource_config, payment_settings
+from paid_trial_app import (
+    MAINNET,
+    TESTNET,
+    app,
+    diagnose_http,
+    http_payment_middleware,
+    http_payment_routes,
+    payment_resource_config,
+    payment_settings,
+)
 
 
 class PaidTrialConfigTests(unittest.TestCase):
@@ -106,6 +119,138 @@ class PaidTrialConfigTests(unittest.TestCase):
         self.assertEqual(config.price, "$0.01")
         self.assertEqual(config.extra, {"name": "USDC", "version": "2"})
 
+    def test_http_bazaar_route_declares_json_input_and_fixed_price(self):
+        settings = {
+            "network": TESTNET,
+            "pay_to": "0x1111111111111111111111111111111111111111",
+            "mode": "testnet",
+            "facilitator_url": "https://x402.org/facilitator",
+        }
+        route = http_payment_routes(settings)["POST /v1/diagnose"]
+        self.assertEqual(route["accepts"]["price"], "$0.01")
+        self.assertEqual(route["accepts"]["network"], TESTNET)
+        bazaar = route["extensions"]["bazaar"]
+        self.assertEqual(bazaar["info"]["input"]["bodyType"], "json")
+        self.assertEqual(bazaar["info"]["input"]["body"]["error"], "HTTP 429 rate limit")
+        self.assertIn("output", bazaar["info"])
+        output = bazaar["info"]["output"]
+        self.assertEqual(output["example"]["payment"], {
+            "mode": "x402-testnet",
+            "price_usd": "0.01",
+        })
+        output_schema = bazaar["schema"]["properties"]["output"]["properties"]["example"]
+        self.assertIn("confidence_basis", output_schema["properties"])
+        self.assertIn("evidence", output_schema["properties"])
+        self.assertEqual(
+            set(output_schema["required"]),
+            {
+                "system", "category", "summary", "confidence", "confidence_basis",
+                "recovery", "evidence", "payment",
+            },
+        )
+        self.assertEqual(
+            output_schema["properties"]["payment"]["properties"]["mode"]["enum"],
+            ["x402-testnet", "x402-mainnet"],
+        )
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("fastapi"),
+        "FastAPI is a pinned dependency of the paid HTTP middleware and is installed in CI",
+    )
+    def test_unpaid_http_diagnosis_returns_402_with_bazaar_metadata_without_running_diagnosis(self):
+        from x402.http import decode_payment_required_header
+        from x402.schemas import SupportedKind, SupportedResponse
+
+        settings = {
+            "network": TESTNET,
+            "pay_to": "0x1111111111111111111111111111111111111111",
+            "mode": "testnet",
+            "facilitator_url": "https://x402.org/facilitator",
+        }
+
+        class FakeFacilitator:
+            def __init__(self, config):
+                self.config = config
+
+            def get_supported(self):
+                return SupportedResponse(kinds=[
+                    SupportedKind(x402_version=2, scheme="exact", network=TESTNET)
+                ])
+
+        with mock.patch("x402.http.HTTPFacilitatorClient", FakeFacilitator):
+            payment_middleware = http_payment_middleware(settings)
+            paid_app = Starlette(
+                routes=[Route("/v1/diagnose", diagnose_http, methods=["POST"])],
+                middleware=[payment_middleware],
+            )
+            with mock.patch("paid_trial_app.diagnose", side_effect=AssertionError("diagnosis must wait for payment")):
+                response = TestClient(paid_app).post(
+                    "/v1/diagnose", json={"error": "HTTP 429 rate limit"}
+                )
+
+        self.assertEqual(response.status_code, 402, response.text)
+        self.assertIn("PAYMENT-REQUIRED", response.headers)
+        required = decode_payment_required_header(response.headers["PAYMENT-REQUIRED"])
+        self.assertIn("bazaar", required.extensions)
+        self.assertEqual(required.accepts[0].network, TESTNET)
+        self.assertEqual(required.accepts[0].amount, "10000")
+
+    def test_http_diagnosis_is_free_when_payments_are_disabled_and_does_not_echo_input(self):
+        error = "HTTP 429 rate limit with token=sk_live_abcdefghijklmnop123456"
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
+            response = TestClient(app, base_url="http://agentrescue-mcp.onrender.com").post(
+                "/v1/diagnose", json={"error": error}
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        diagnosis = response.json()
+        self.assertEqual(diagnosis["category"], "rate_limit")
+        self.assertEqual(diagnosis["payment"], {"mode": "disabled", "price_usd": "0.00"})
+        self.assertNotIn("sk_live_abcdefghijklmnop123456", response.text)
+
+    def test_http_diagnosis_rejects_invalid_and_oversized_requests(self):
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
+            client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+            invalid_json = client.post("/v1/diagnose", content="{")
+            extra_field = client.post("/v1/diagnose", json={"error": "HTTP 429", "secret": "x"})
+            invalid_system = client.post("/v1/diagnose", json={"error": "HTTP 429", "system": "shell"})
+            too_long = client.post("/v1/diagnose", json={"error": "x" * 8001})
+        self.assertEqual(invalid_json.status_code, 400)
+        self.assertEqual(extra_field.status_code, 400)
+        self.assertEqual(invalid_system.status_code, 400)
+        self.assertEqual(too_long.status_code, 413)
+
+    def test_agent_setup_docs_expose_absolute_endpoints(self):
+        client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+        guide = client.get("/llms.txt").text
+        homepage = client.get("/").text
+        openapi = client.get("/openapi.json").json()
+
+        self.assertIn("https://agentrescue-mcp.onrender.com/mcp", guide)
+        self.assertIn("https://agentrescue-mcp.onrender.com/v1/diagnose", guide)
+        self.assertIn("https://agentrescue-mcp.onrender.com/openapi.json", guide)
+        self.assertIn("href='/llms.txt'", homepage)
+        self.assertIn("https://agentrescue-mcp.onrender.com/mcp", homepage)
+        self.assertEqual(
+            openapi["servers"],
+            [{"url": "https://agentrescue-mcp.onrender.com"}],
+        )
+
+    def test_openapi_documents_http_payment_boundary_and_402_when_enabled(self):
+        client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
+            free_schema = client.get("/openapi.json").json()
+        payment_schema = free_schema["components"]["schemas"]["Diagnosis"]["properties"]["payment"]
+        self.assertEqual(payment_schema["properties"]["mode"]["enum"][0], "disabled")
+
+        with mock.patch.dict("os.environ", {
+            "AGENTRESCUE_X402_ENABLED": "1",
+            "AGENTRESCUE_X402_TEST_MODE": "1",
+            "AGENTRESCUE_X402_NETWORK": TESTNET,
+            "AGENTRESCUE_X402_PAY_TO": "0x1111111111111111111111111111111111111111",
+        }, clear=False):
+            paid_schema = client.get("/openapi.json").json()
+        self.assertIn("402", paid_schema["paths"]["/v1/diagnose"]["post"]["responses"])
+
     def test_mcp_lists_tool_for_free_then_returns_no_charge_diagnosis(self):
         headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
         with mock.patch.dict("os.environ", {"AGENTRESCUE_X402_ENABLED": "0"}, clear=False):
@@ -185,6 +330,50 @@ class PaidTrialConfigTests(unittest.TestCase):
                 self.assertEqual(diagnosis["payment"]["mode"], "disabled")
                 rejected = client.get("/mcp", headers={"Host": "attacker.example"})
                 self.assertEqual(rejected.status_code, 421)
+
+
+    def test_feedback_is_disabled_by_default(self):
+        with mock.patch.dict("os.environ", {"AGENTRESCUE_FEEDBACK_ENABLED": "0"}, clear=False):
+            with mock.patch("paid_trial_app._allow", return_value=True):
+                response = TestClient(app, base_url="http://agentrescue-mcp.onrender.com").post(
+                    "/v1/feedback", json={"opt_in": True, "category": "rate_limit"}
+                )
+        self.assertEqual(response.status_code, 404)
+
+    def test_feedback_requires_opt_in_rejects_raw_fields_and_stores_only_labels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            feedback_path = directory + "/feedback.jsonl"
+            env = {
+                "AGENTRESCUE_FEEDBACK_ENABLED": "1",
+                "AGENTRESCUE_FEEDBACK_PATH": feedback_path,
+            }
+            with mock.patch.dict("os.environ", env, clear=False):
+                with mock.patch("paid_trial_app._allow", return_value=True):
+                    client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+                    no_opt_in = client.post("/v1/feedback", json={"category": "rate_limit"})
+                    raw_text = client.post("/v1/feedback", json={
+                        "opt_in": True,
+                        "category": "rate_limit",
+                        "outcome": "resolved",
+                        "error": "token=sk_live_do_not_store_12345678",
+                    })
+                    invalid_category = client.post("/v1/feedback", json={
+                        "opt_in": True, "category": "raw diagnostic", "outcome": "resolved",
+                    })
+                    accepted = client.post("/v1/feedback", json={
+                        "opt_in": True, "category": "rate_limit", "outcome": "resolved",
+                    })
+
+            self.assertEqual(no_opt_in.status_code, 400)
+            self.assertEqual(raw_text.status_code, 400)
+            self.assertEqual(invalid_category.status_code, 400)
+            self.assertEqual(accepted.status_code, 201, accepted.text)
+            with open(feedback_path, encoding="utf-8") as stream:
+                stored = json.loads(stream.read())
+            self.assertEqual(set(stored), {"category", "outcome", "at"})
+            self.assertEqual(stored["category"], "rate_limit")
+            self.assertEqual(stored["outcome"], "resolved")
+            self.assertNotIn("sk_live_do_not_store_12345678", json.dumps(stored))
 
 
 if __name__ == "__main__":

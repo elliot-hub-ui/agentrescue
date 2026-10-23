@@ -53,7 +53,7 @@ def _has_signal(signal,text):
   if not matches:
    if text.strip()==signal:return True
    return signal=='429' and bool(re.search(r'\brate[ -]?limit(?:ed| exceeded)?\b|too many requests',text,re.I))
-  success=list(re.finditer(r'\b(?:HTTP\s*|status(?:\s+code)?\s*[:=]?\s*|response(?:\s+status)?\s*[:=]?\s*|returned\s+|got\s+|health check(?:\s+is)?\s+)(2\d\d)\b',text,re.I))
+  success=list(re.finditer(r'\b(?:HTTP\s*|status(?:\s+code)?\s*[:=]?\s*|response(?:\s+status)?\s*[:=]?\s*|response\s+(?:was|returned)\s+|returned\s+|got\s+|health check(?:\s+is)?\s+)(2\d\d)\b',text,re.I))
   return not (success and success[-1].start()>matches[-1].start())
  if signal=='required':
   matches=list(re.finditer(r'\b(?:is|are|was|were)\s+required\b|\brequired\s+(?:field|parameter|argument)\b|\bmissing\s+(?:a\s+)?required\b',text,re.I))
@@ -66,7 +66,7 @@ def diagnose(error,system='http'):
  s=R.sub('[REDACTED]',str(error)[:MAX_DIAGNOSIS_CHARS]);q=next((r for r in RULES if _has_signal(r[0],s)),None)
  if q:
   sig,cat,advice,risk=q;confidence='medium';basis='A deterministic rule matched a known error phrase; this is not a calibrated probability.'
-  summary=f"Matched a {cat.replace('_',' ')} failure indicator. Confirm it applies to the latest failing request."
+  summary=f"A known error signal was classified as \'{cat.replace('_',' ')}\'. Confirm it applies to the latest failing request."
  else:
   sig,cat,advice,risk,confidence,basis='','unknown','Capture a sanitized trace, timestamp and request ID; compare with a known-good run.','medium','low','No known error phrase matched; gather more evidence before acting.'
   summary='No supported failure indicator matched. Gather a sanitized trace and compare with a known-good result.'
