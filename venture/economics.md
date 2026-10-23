@@ -70,7 +70,7 @@ This is a **recommendation to review**, not a plan change. Render's tools did no
 
 ## Registry launch, observed demand, and price sensitivity — 2026-10-23
 
-The live service now runs the tested HTTP/MCP app with payments and feedback off. The official MCP Registry reports `io.github.elliot-hub-ui/agentrescue` version `0.2.0` as active: [public listing](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.elliot-hub-ui%2Fagentrescue/versions/latest). This improves discoverability but does not establish usage or willingness to pay.
+The live service now runs commit `c450b88ea069c1978e4fd22cdfc5f90d5d47a99d` of the tested HTTP/MCP app with payments and feedback off. A synthetic MCP diagnosis returned the `mcp_protocol` category and read-only recovery guidance. The official MCP Registry reports `io.github.elliot-hub-ui/agentrescue` version `0.2.1` as active: [public listing](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.elliot-hub-ui%2Fagentrescue/versions/latest). This improves discoverability but does not establish independent usage or willingness to pay.
 
 Render's 2026-10-16 18:15 UTC to 2026-10-23 18:15 UTC metrics show **7** requests to `/v1/diagnose` and **31** to `/mcp`. Our own launch checks, earlier QA, and scans are included in these counts; the service does not identify the remaining callers, so none of these requests is counted as verified independent customer demand. No paid request or production settlement is observed; x402 remains disabled.
 
