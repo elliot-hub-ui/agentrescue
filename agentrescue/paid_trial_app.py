@@ -21,7 +21,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
 from app import FEEDBACK_CATEGORIES, FEEDBACK_OUTCOMES, MAX_DIAGNOSIS_CHARS, SCHEMA, diagnose
@@ -447,6 +447,28 @@ mcp = FastMCP(
 )
 
 
+@mcp.resource(
+    "agentrescue://guide/diagnosis",
+    name="AgentRescue diagnosis guide",
+    description="When to use AgentRescue and how to interpret safe, read-only diagnosis results.",
+    mime_type="text/markdown",
+)
+def diagnosis_guide() -> str:
+    """Expose concise, stable usage and safety guidance to MCP clients."""
+    return (
+        "# AgentRescue diagnosis guide\n\n"
+        "Use AgentRescue after an HTTP, API, or MCP request fails, or when transport succeeds "
+        "but the returned result is missing or incorrect. Call `diagnose_failure` with the "
+        "sanitized error and its system (`http`, `api`, or `mcp`).\n\n"
+        "Results are advisory. Confidence labels are not calibrated probabilities, and "
+        "diagnostic rules can miss context. Review the evidence and confirm the failure is "
+        "current before acting. High-risk advice requires human approval; fixes never execute "
+        "automatically.\n\n"
+        "Send only synthetic or sanitized diagnostic text. Never send credentials or personal "
+        "data. The service currently charges nothing; payment collection is disabled.\n"
+    )
+
+
 async def _configure_tool() -> None:
     global _configured
     async with _configure_lock:
@@ -512,6 +534,10 @@ async def llms(request: Request):
         "# AgentRescue\n\n"
         f"HTTP API: POST {PUBLIC_BASE_URL}/v1/diagnose with a JSON error and optional system (http, api, or mcp).\n"
         f"MCP endpoint: {PUBLIC_BASE_URL}/mcp (Streamable HTTP). Discover tools freely with tools/list.\n"
+        "## When to use\n"
+        "Use AgentRescue after an HTTP, API, or MCP request fails, or when transport succeeds but the result is missing or incorrect. Send only a sanitized error from the latest failure.\n"
+        f"Developer quickstart: {PUBLIC_BASE_URL}/developers.\n"
+        f"Pricing: {PUBLIC_BASE_URL}/pricing.\n"
         f"OpenAPI: {PUBLIC_BASE_URL}/openapi.json.\n"
         "Call diagnose_failure with a sanitized HTTP, API, or MCP error. Advice is read-only.\n"
         f"{price}\n"
@@ -519,6 +545,31 @@ async def llms(request: Request):
         "Do not send secrets or personal data.\n"
     )
     return PlainTextResponse(content)
+
+
+async def robots(request: Request):
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /v1/feedback\n"
+        f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+    )
+    return PlainTextResponse(body)
+
+
+async def sitemap(request: Request):
+    lastmod = time.strftime("%Y-%m-%d", time.gmtime())
+    locations = ["/", "/developers", "/pricing", "/openapi.json", "/llms.txt"]
+    entries = "".join(
+        f"<url><loc>{PUBLIC_BASE_URL}{path}</loc><lastmod>{lastmod}</lastmod></url>"
+        for path in locations
+    )
+    body = (
+        "<?xml version='1.0' encoding='UTF-8'?>"
+        "<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"
+        f"{entries}</urlset>"
+    )
+    return Response(body, media_type="application/xml")
 
 
 async def openapi(request: Request):
@@ -543,6 +594,32 @@ async def openapi(request: Request):
             "description": "x402 payment required; includes the accepted payment requirements."
         }
     return JSONResponse(schema)
+
+
+async def developers(request: Request):
+    html = (
+        "<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
+        "<title>AgentRescue Developers</title><main><h1>Developer quickstart</h1>"
+        "<p>Use AgentRescue when an HTTP, API or MCP request fails, or when a successful transport response has the wrong result. Advice is read-only; fixes never run automatically.</p>"
+        "<h2>HTTP</h2><p>Send a sanitized error. The current pilot is free and returns structured recovery guidance.</p>"
+        f"<pre>curl -sS {PUBLIC_BASE_URL}/v1/diagnose \\\n  -H 'Content-Type: application/json' \\\n  -d '{{\"error\":\"HTTP 503 Service Unavailable\",\"system\":\"http\"}}'</pre>"
+        "<h2>MCP</h2><p>Connect with Streamable HTTP and call <code>diagnose_failure</code> after listing tools. Read <code>agentrescue://guide/diagnosis</code> for use and safety guidance.</p>"
+        f"<pre>{{\"mcpServers\":{{\"agentrescue\":{{\"url\":\"{PUBLIC_BASE_URL}/mcp\"}}}}}}</pre>"
+        "<h2>Response behavior</h2><p>Responses identify a category, evidence signals, qualitative confidence and recovery guidance. Confidence is not a calibrated probability. High-risk guidance requires human review. Never send credentials or personal data.</p>"
+        "<p><a href='/openapi.json'>OpenAPI</a> · <a href='/llms.txt'>Agent guide</a> · <a href='/pricing'>Pricing</a></p></main></html>"
+    )
+    return HTMLResponse(html)
+
+
+async def pricing(request: Request):
+    html = (
+        "<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
+        "<title>AgentRescue Pricing</title><main><h1>Pricing</h1>"
+        "<h2>Current pilot</h2><p>Diagnosis is free today. Payment collection is disabled, so no diagnosis can be charged.</p>"
+        "<h2>Pay-per-diagnosis</h2><p>The implemented x402 price is $0.01 USDC per successful diagnosis when the service owner explicitly enables payments. This price is not active today. MCP discovery, tool listing, health checks and documentation remain free.</p>"
+        "<p>There are no subscriptions, recurring charges or accounts to cancel. Review <a href='/developers'>developer setup</a> or the <a href='/openapi.json'>OpenAPI contract</a>.</p></main></html>"
+    )
+    return HTMLResponse(html)
 
 
 async def diagnose_http(request: Request):
@@ -604,17 +681,57 @@ async def feedback(request: Request):
 
 
 async def home(request: Request):
+    accept = request.headers.get("accept", "")
+    media_types: dict[str, float] = {}
+    for item in accept.split(","):
+        parts = [part.strip() for part in item.split(";")]
+        media_type = parts[0].lower()
+        quality = 1.0
+        for parameter in parts[1:]:
+            if parameter.lower().startswith("q="):
+                try:
+                    quality = float(parameter[2:])
+                except ValueError:
+                    quality = 0.0
+        if media_type:
+            media_types[media_type] = quality
+    markdown_quality = media_types.get("text/markdown", 0.0)
+    html_quality = media_types.get("text/html", media_types.get("*/*", 0.0))
+    if markdown_quality > 0 and markdown_quality >= html_quality:
+        markdown = (
+            "# AgentRescue\n\n"
+            "Safer next steps for failing AI agents. AgentRescue returns bounded, structured "
+            "recovery guidance for HTTP, API, and MCP failures; it never executes fixes.\n\n"
+            "## When to use it\n"
+            "Use AgentRescue when a request fails or when a successful transport response does "
+            "not contain the expected result. Send only a sanitized error from the latest "
+            "failure.\n\n"
+            "## Connect\n"
+            f"- HTTP API: POST {PUBLIC_BASE_URL}/v1/diagnose\n"
+            f"- MCP: {PUBLIC_BASE_URL}/mcp (Streamable HTTP)\n"
+            f"- Agent guide: {PUBLIC_BASE_URL}/llms.txt\n"
+            f"- OpenAPI: {PUBLIC_BASE_URL}/openapi.json\n\n"
+            "Diagnosis is currently free; payments are disabled. Advice is read-only, "
+            "confidence is not a calibrated probability, and high-risk guidance requires "
+            "human review. Never send credentials or personal data.\n"
+        )
+        return Response(markdown, media_type="text/markdown", headers={"Vary": "Accept"})
     mode = payment_settings()
     status = "Payment trial is active: each successful diagnosis costs $0.01 USDC." if mode else "The payment trial is not enabled; no diagnosis charges are collected."
     html = (
         "<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
-        "<title>AgentRescue</title><main><h1>Safer next steps for failing agents.</h1>"
+        f"<link rel='canonical' href='{PUBLIC_BASE_URL}/'><meta property='og:type' content='website'>"
+        f"<meta property='og:title' content='AgentRescue'><meta property='og:description' content='Structured, read-only recovery guidance for HTTP, API and MCP failures.'><meta property='og:url' content='{PUBLIC_BASE_URL}/'>"
+        "<title>AgentRescue | Safer next steps for failing agents</title>"
+        "<script type='application/ld+json'>{\"@context\":\"https://schema.org\",\"@type\":\"SoftwareApplication\",\"name\":\"AgentRescue\",\"description\":\"Structured, read-only recovery guidance for HTTP, API and MCP failures.\",\"applicationCategory\":\"DeveloperApplication\",\"operatingSystem\":\"Any\",\"url\":\"https://agentrescue-mcp.onrender.com/\",\"offers\":{\"@type\":\"Offer\",\"price\":\"0.00\",\"priceCurrency\":\"USD\",\"description\":\"Current no-charge pilot; payments are disabled.\"}}</script>"
+        "<main><h1>Safer next steps for failing agents.</h1>"
         "<p>AgentRescue returns bounded, structured recovery guidance for HTTP, API, and MCP failures."
         " It never executes fixes.</p><p>" + status + "</p>"
-        f"<p>Agents: POST a sanitized JSON error to <code>{PUBLIC_BASE_URL}/v1/diagnose</code> or connect to <code>{PUBLIC_BASE_URL}/mcp</code>. <a href='/llms.txt'>Agent guide</a> · <a href='/openapi.json'>OpenAPI</a>. Discovery and tool listing are free.</p>"
+        f"<p>Agents: POST a sanitized JSON error to <code>{PUBLIC_BASE_URL}/v1/diagnose</code> or connect to <code>{PUBLIC_BASE_URL}/mcp</code>. Discovery and tool listing are free.</p>"
+        "<p><a href='/developers'>Developer quickstart</a> · <a href='/pricing'>Pricing</a> · <a href='/llms.txt'>Agent guide</a> · <a href='/openapi.json'>OpenAPI</a></p>"
         "<p>Send only synthetic or sanitized errors; secret redaction is best-effort.</p></main></html>"
     )
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers={"Vary": "Accept"})
 
 
 @contextlib.asynccontextmanager
@@ -629,7 +746,11 @@ app = Starlette(
     routes=[
         Route("/health", health, methods=["GET"]),
         Route("/llms.txt", llms, methods=["GET"]),
+        Route("/robots.txt", robots, methods=["GET"]),
+        Route("/sitemap.xml", sitemap, methods=["GET"]),
         Route("/openapi.json", openapi, methods=["GET"]),
+        Route("/developers", developers, methods=["GET"]),
+        Route("/pricing", pricing, methods=["GET"]),
         Route("/", home, methods=["GET"]),
         Route("/v1/diagnose", diagnose_http, methods=["POST"]),
         Route("/v1/feedback", feedback, methods=["POST"]),

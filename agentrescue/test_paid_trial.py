@@ -2,6 +2,7 @@ import importlib.util
 import json
 import unittest
 import tempfile
+import xml.etree.ElementTree as ET
 from unittest import mock
 
 from starlette.applications import Starlette
@@ -223,17 +224,54 @@ class PaidTrialConfigTests(unittest.TestCase):
         client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
         guide = client.get("/llms.txt").text
         homepage = client.get("/").text
+        developer_page = client.get("/developers")
+        pricing_page = client.get("/pricing")
+        robots = client.get("/robots.txt")
+        sitemap = client.get("/sitemap.xml")
         openapi = client.get("/openapi.json").json()
 
         self.assertIn("https://agentrescue-mcp.onrender.com/mcp", guide)
         self.assertIn("https://agentrescue-mcp.onrender.com/v1/diagnose", guide)
         self.assertIn("https://agentrescue-mcp.onrender.com/openapi.json", guide)
-        self.assertIn("href='/llms.txt'", homepage)
+        self.assertIn("## When to use", guide)
+        self.assertIn("https://agentrescue-mcp.onrender.com/developers", guide)
+        self.assertIn("https://agentrescue-mcp.onrender.com/pricing", guide)
+        self.assertIn("href='/developers'", homepage)
+        self.assertIn("href='/pricing'", homepage)
         self.assertIn("https://agentrescue-mcp.onrender.com/mcp", homepage)
+        jsonld = homepage.split("<script type='application/ld+json'>", 1)[1].split("</script>", 1)[0]
+        self.assertEqual(json.loads(jsonld)["@type"], "SoftwareApplication")
+        self.assertIn("/v1/diagnose", developer_page.text)
+        self.assertIn("diagnose_failure", developer_page.text)
+        self.assertEqual(developer_page.status_code, 200)
+        self.assertIn("Diagnosis is free today", pricing_page.text)
+        self.assertIn("$0.01 USDC", pricing_page.text)
+        self.assertIn("This price is not active today", pricing_page.text)
+        self.assertEqual(pricing_page.status_code, 200)
+        self.assertIn("Sitemap: https://agentrescue-mcp.onrender.com/sitemap.xml", robots.text)
+        self.assertEqual(robots.status_code, 200)
+        urls = ET.fromstring(sitemap.content).findall("{http://www.sitemaps.org/schemas/sitemap/0.9}url")
+        self.assertEqual(sitemap.status_code, 200)
+        self.assertTrue(any(url.findtext("{http://www.sitemaps.org/schemas/sitemap/0.9}loc", "").endswith("/developers") for url in urls))
+        self.assertTrue(all(url.find("{http://www.sitemaps.org/schemas/sitemap/0.9}lastmod") is not None for url in urls))
         self.assertEqual(
             openapi["servers"],
             [{"url": "https://agentrescue-mcp.onrender.com"}],
         )
+
+    def test_homepage_negotiates_markdown_and_varies_on_accept(self):
+        client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
+        markdown = client.get("/", headers={"Accept": "text/markdown"})
+        html = client.get("/", headers={"Accept": "text/html"})
+        self.assertEqual(markdown.status_code, 200)
+        self.assertEqual(markdown.headers["content-type"], "text/markdown; charset=utf-8")
+        self.assertEqual(markdown.headers["vary"], "Accept")
+        self.assertIn("# AgentRescue", markdown.text)
+        self.assertIn("/v1/diagnose", markdown.text)
+        self.assertEqual(html.status_code, 200)
+        self.assertTrue(html.headers["content-type"].startswith("text/html"))
+        self.assertEqual(html.headers["vary"], "Accept")
+        self.assertIn("<h1>Safer next steps for failing agents.</h1>", html.text)
 
     def test_openapi_documents_http_payment_boundary_and_402_when_enabled(self):
         client = TestClient(app, base_url="http://agentrescue-mcp.onrender.com")
@@ -306,13 +344,28 @@ class PaidTrialConfigTests(unittest.TestCase):
                     },
                 })
                 self.assertEqual(initialized.status_code, 200, initialized.text)
-                negotiated = initialized.json()["result"]["protocolVersion"]
+                initialize_result = initialized.json()["result"]
+                negotiated = initialize_result["protocolVersion"]
+                self.assertIn("resources", initialize_result["capabilities"])
                 request_headers = {**headers, "MCP-Protocol-Version": negotiated}
                 listed = client.post("/mcp", headers=request_headers, json={
                     "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
                 })
                 self.assertEqual(listed.status_code, 200, listed.text)
                 self.assertEqual(listed.json()["result"]["tools"][0]["name"], "diagnose_failure")
+                resources = client.post("/mcp", headers=request_headers, json={
+                    "jsonrpc": "2.0", "id": 4, "method": "resources/list", "params": {},
+                })
+                self.assertEqual(resources.status_code, 200, resources.text)
+                resource_uri = "agentrescue://guide/diagnosis"
+                self.assertIn(resource_uri, [item["uri"] for item in resources.json()["result"]["resources"]])
+                resource = client.post("/mcp", headers=request_headers, json={
+                    "jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": {"uri": resource_uri},
+                })
+                self.assertEqual(resource.status_code, 200, resource.text)
+                guide_text = resource.json()["result"]["contents"][0]["text"]
+                self.assertIn("Never send credentials or personal data", guide_text)
+                self.assertIn("High-risk advice requires human approval", guide_text)
                 called = client.post("/mcp", headers=request_headers, json={
                     "jsonrpc": "2.0",
                     "id": 3,
