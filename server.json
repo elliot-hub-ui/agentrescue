@@ -3,7 +3,7 @@
   "name": "io.github.elliot-hub-ui/agentrescue",
   "title": "AgentRescue",
   "description": "MCP diagnostics that help AI agents find safe next steps for HTTP, API, and MCP failures.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "websiteUrl": "https://agentrescue-mcp.onrender.com/",
   "repository": {
     "url": "https://github.com/elliot-hub-ui/agentrescue",

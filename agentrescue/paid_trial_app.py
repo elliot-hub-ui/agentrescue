@@ -24,7 +24,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
-from app import FEEDBACK_CATEGORIES, FEEDBACK_OUTCOMES, MAX_DIAGNOSIS_CHARS, SCHEMA, diagnose
+from app import FEEDBACK_CATEGORIES, FEEDBACK_OUTCOMES, MAX_DIAGNOSIS_CHARS, SCHEMA, VERSION, diagnose
 
 PRICE = "$0.01"
 PUBLIC_BASE_URL = "https://agentrescue-mcp.onrender.com"
@@ -416,8 +416,14 @@ class McpPostRoute(Route):
                 "resultType": "complete",
                 "supportedVersions": ["2025-11-25", "2025-06-18", "2025-03-26"],
                 "capabilities": {"tools": {}},
-                "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "agentrescue", "version": "0.2.0"}},
-                "instructions": f"Use tools/list, then call diagnose_failure with a sanitized HTTP, API, or MCP error. {price_text} Advice is read-only.",
+                "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "agentrescue", "version": VERSION}},
+                "instructions": (
+                    "Use diagnose_failure after an HTTP, API, or MCP request fails, or when "
+                    "transport succeeds but the expected result is missing or incorrect. "
+                    "Send only sanitized error text from the latest request. "
+                    f"{price_text} Advice is rule-based and read-only; high-risk steps need "
+                    "human approval. Never send credentials or personal data."
+                ),
                 "ttlMs": 300000,
                 "cacheScope": "public",
             },
@@ -427,6 +433,13 @@ class McpPostRoute(Route):
 
 mcp = FastMCP(
     "AgentRescue",
+    instructions=(
+        "Use diagnose_failure after an HTTP, API, or MCP request fails, or when transport "
+        "succeeds but the expected result is missing or incorrect. Provide only sanitized "
+        "error text from the latest request and the matching system. Results are advisory, "
+        "rule-based, and never run fixes. Review evidence before acting; high-risk changes "
+        "require human approval. Never send credentials or personal data."
+    ),
     stateless_http=True,
     json_response=True,
     transport_security=TransportSecuritySettings(
@@ -445,6 +458,8 @@ mcp = FastMCP(
         ],
     ),
 )
+# FastMCP does not expose the protocol server version as a constructor option.
+mcp._mcp_server.version = VERSION
 
 
 @mcp.resource(
@@ -502,7 +517,12 @@ async def _configure_tool() -> None:
                 extensions=payment_discovery_extension(),
             )
 
-        description = "Diagnose a sanitized HTTP/API/MCP error."
+        description = (
+            "Use after an HTTP, API, or MCP request fails, or when transport succeeds but "
+            "the expected result is missing or incorrect. Send only the sanitized error "
+            "from the latest request and its system. Returns advisory, evidence-linked "
+            "recovery steps; never executes fixes. Never include credentials or personal data."
+        )
         if settings:
             description += " Paid trial: exactly $0.01 USDC per successful diagnosis."
         else:

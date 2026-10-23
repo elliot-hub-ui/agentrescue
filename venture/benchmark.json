@@ -18,5 +18,17 @@
  {"error":"HTTP 401 bearer secret ABCDEFGHIJKLMNOP","expected":"authentication"},
  {"error":"Tool returned success but agent produced no result","expected":"semantic_failure"},
  {"error":"Invalid API request: field model is required","expected":"bad_request"},
- {"error":"HTTP 404 resource not found","expected":"not_found"}
+ {"error":"HTTP 404 resource not found","expected":"not_found"},
+ {"error":"HTTP 400 Bad Request","expected":"bad_request"},
+ {"error":"HTTP 422 Unprocessable Entity","expected":"bad_request"},
+ {"error":"HTTP 504 Gateway Timeout","expected":"gateway"},
+ {"error":"MCP tools/call returned malformed JSON","expected":"mcp_protocol"},
+ {"error":"MCP server rejected invalid params with -32602","expected":"mcp_protocol"},
+ {"error":"HTTP 429 followed by HTTP 503; latest failure is 503","expected":"unavailable"},
+ {"error":"HTTP 503 followed by HTTP 429; latest failure is 429","expected":"rate_limit"},
+ {"error":"HTTP 401 Unauthorized followed by HTTP 403 Forbidden","expected":"authorization"},
+ {"error":"The current request returned HTTP 200; an older log says HTTP 503","expected":"unknown"},
+ {"error":"An earlier request returned HTTP 429; the latest response returned HTTP 200","expected":"unknown"},
+ {"error":"The older request was HTTP 429; current request returned HTTP 503","expected":"unavailable"},
+ {"error":"Current response was HTTP 503; current retry returned HTTP 200","expected":"unknown"}
 ]

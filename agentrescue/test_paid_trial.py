@@ -9,6 +9,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
+from app import VERSION
 from paid_trial_app import (
     MAINNET,
     TESTNET,
@@ -306,8 +307,11 @@ class PaidTrialConfigTests(unittest.TestCase):
                 })
                 self.assertEqual(discovered.status_code, 200, discovered.text)
                 discovery = discovered.json()["result"]
+                self.assertEqual(discovery["_meta"]["io.modelcontextprotocol/serverInfo"]["version"], VERSION)
                 self.assertEqual(discovery["supportedVersions"], ["2025-11-25", "2025-06-18", "2025-03-26"])
                 self.assertIn("paid trial is currently disabled", discovery["instructions"])
+                self.assertIn("latest request", discovery["instructions"])
+                self.assertIn("human approval", discovery["instructions"])
 
                 unsupported = client.post("/mcp", headers={
                     **headers,
@@ -346,13 +350,18 @@ class PaidTrialConfigTests(unittest.TestCase):
                 self.assertEqual(initialized.status_code, 200, initialized.text)
                 initialize_result = initialized.json()["result"]
                 negotiated = initialize_result["protocolVersion"]
+                self.assertEqual(initialize_result["serverInfo"]["version"], VERSION)
                 self.assertIn("resources", initialize_result["capabilities"])
+                self.assertIn("latest request", initialize_result["instructions"])
                 request_headers = {**headers, "MCP-Protocol-Version": negotiated}
                 listed = client.post("/mcp", headers=request_headers, json={
                     "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
                 })
                 self.assertEqual(listed.status_code, 200, listed.text)
                 self.assertEqual(listed.json()["result"]["tools"][0]["name"], "diagnose_failure")
+                tool_description = listed.json()["result"]["tools"][0]["description"]
+                self.assertIn("latest request", tool_description)
+                self.assertIn("never executes fixes", tool_description)
                 resources = client.post("/mcp", headers=request_headers, json={
                     "jsonrpc": "2.0", "id": 4, "method": "resources/list", "params": {},
                 })

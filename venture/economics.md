@@ -67,3 +67,23 @@ Render's service list shows six services in the shared workspace, including Agen
 The user-provided plan screenshot shows Pro. Render's current official pricing lists Pro at **$25/month** with 25 GB and Hobby at **$0/month** with 5 GB; overage is **$0.15/GB**. The existing AgentRescue Starter compute is separately estimated at **$7/month** and would remain paid if the workspace moved to Hobby. Thus, a Hobby workspace could lower the shared baseline by up to $25/month while leaving AgentRescue compute always-on; gross hosting break-even at $0.01 would fall from about 3,200 calls on the $32 Pro-plus-compute allocation to about 700 calls on $7 compute. These are fixed-cost calculations only, not net profit or demand forecasts.
 
 This is a **recommendation to review**, not a plan change. Render's tools did not expose the invoice, other workspace usage outside the six listed services, or member count. Pro-only features include multiple members, compliance reports, audit logs, autoscaling and isolated environments; the six listed services use no paid AgentRescue autoscaling and the service has no custom domain, but workspace-wide needs are unknown. A downgrade would affect every service in the workspace. Do not change the workspace plan until the owner confirms those needs and approves it. Sources: [Render pricing](https://render.com/pricing), [workspace plan comparison](https://render.com/docs/new-workspace-plans), [outbound bandwidth](https://render.com/docs/outbound-bandwidth), and [compute plans](https://render.com/docs/compute-plans).
+
+## Registry launch, observed demand, and price sensitivity — 2026-10-23
+
+The live service now runs the tested HTTP/MCP app with payments and feedback off. The official MCP Registry reports `io.github.elliot-hub-ui/agentrescue` version `0.2.0` as active: [public listing](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.elliot-hub-ui%2Fagentrescue/versions/latest). This improves discoverability but does not establish usage or willingness to pay.
+
+Render's 2026-10-16 18:15 UTC to 2026-10-23 18:15 UTC metrics show **7** requests to `/v1/diagnose` and **31** to `/mcp`. Our own launch checks, earlier QA, and scans are included in these counts; the service does not identify the remaining callers, so none of these requests is counted as verified independent customer demand. No paid request or production settlement is observed; x402 remains disabled.
+
+The following are gross hosting-only break-even counts, using roughly **$32/month** for the Pro workspace plus AgentRescue compute, or **$7/month** for AgentRescue compute alone. They assume every counted request is a successful paid diagnosis and exclude payment fees, acquisition, support, taxes, and maintenance. They are arithmetic, not a price recommendation or revenue forecast.
+
+| Hypothetical price per paid diagnosis | Calls to cover ~$32/month | Calls to cover ~$7/month |
+|---:|---:|---:|
+| $0.01 | 3,200 | 700 |
+| $0.05 | 640 | 140 |
+| $0.10 | 320 | 70 |
+| $0.25 | 128 | 28 |
+| $1.00 | 32 | 7 |
+
+The x402 project documentation describes facilitators as verifying and settling payments, and says Coinbase's facilitator adds no fee on Base; that does not prove the current service has a production facilitator or that settlement is costless to AgentRescue. A supported, owner-approved production facilitator must be selected and actual costs measured before treating one cent as profitable. Source: [x402 facilitator and fee guidance](https://x402.gitbook.io/x402/core-concepts/facilitator).
+
+Decision: keep the public pilot free while discovery and value are unverified. Before enabling charges, collect evidence that independent agents complete useful diagnoses and that an agent operator accepts a specific price. If usage is real but the one-cent price cannot cover fixed costs, test a higher price with users before changing the live offer; price sensitivity above is only a planning aid.

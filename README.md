@@ -1,21 +1,28 @@
 # AgentRescue
 
-AgentRescue is an MCP tool for AI agents diagnosing HTTP, API, and MCP failures. It returns bounded, read-only recovery guidance; it never executes fixes.
+AgentRescue helps AI agents diagnose HTTP, API, and MCP failures. It returns bounded, structured recovery guidance and never executes fixes.
 
-## Connect
+## Live service
 
-MCP endpoint: `https://agentrescue-mcp.onrender.com/mcp` using Streamable HTTP.
+- **MCP:** `https://agentrescue-mcp.onrender.com/mcp` (Streamable HTTP)
+- **HTTP diagnosis:** `POST https://agentrescue-mcp.onrender.com/v1/diagnose`
+- **Developer setup:** `https://agentrescue-mcp.onrender.com/developers`
+- **Pricing and current payment status:** `https://agentrescue-mcp.onrender.com/pricing`
+- **OpenAPI:** `https://agentrescue-mcp.onrender.com/openapi.json`
+- **Agent instructions:** `https://agentrescue-mcp.onrender.com/llms.txt`
 
-Discovery and tool listing are free. The **live Render service currently runs the no-charge prototype**. The paid-trial implementation is published and passes CI, but is not yet live. Its Render blueprint selects `agentrescue/paid_trial_app.py` and keeps `AGENTRESCUE_X402_ENABLED=0`; the existing service has manual settings that still start `agentrescue/app.py`.
+The live service runs `agentrescue/paid_trial_app.py`. Diagnosis is currently free because x402 payments are disabled. The public registry listing is [AgentRescue 0.2.0](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.elliot-hub-ui%2Fagentrescue/versions/latest). No customer demand or production revenue has been verified.
 
-The proposed paid trial costs exactly **$0.01 USDC per successful diagnosis** through x402. Payments remain disabled until the owner supplies a receiving address, selects a production HTTPS facilitator, explicitly approves mainnet, and reviews the exact live configuration. No production revenue is currently collected.
+Send only synthetic or sanitized error excerpts; secret redaction is best-effort. Recovery guidance is advisory, confidence is qualitative and uncalibrated, and high-risk steps require human review.
 
-Send only synthetic or sanitized error excerpts. Secret redaction is best-effort. Requests are limited to 60 GET and 20 POST per minute per instance, with 16 KB request and response caps. The service does not intentionally persist diagnostic requests.
+## Run locally
 
-## Bandwidth and unit economics
+Requires Python 3.12+. Install the pinned dependencies from `agentrescue/requirements.txt` and `agentrescue/requirements.lock`, then start the hosted entry point from `agentrescue/` with `python -m uvicorn paid_trial_app:app --host 127.0.0.1 --port 8000`. For the minimal standard-library prototype, run `python3 app.py` from `agentrescue/`.
 
-At a maximum 16 KB response, marginal public egress at Render's documented $0.15/GB rate is at most **$0.0000024 per response**. Against a $0.01 paid diagnosis, gross call revenue is about **4,166× the maximum response-bandwidth cost**. This excludes fixed compute, payment/facilitator fees, support, acquisition, taxes, and maintenance, so it does not prove profitability.
+Run checks from `agentrescue/` with `.venv/bin/python -m compileall -q .` and `.venv/bin/python -m unittest -q`.
 
-The Render service uses one 0.5 CPU / 512 MB instance at about $7/month compute. It therefore needs roughly **700 successful paid calls just to cover compute**, before other costs. The 5 GB Hobby bandwidth allowance is shared across workspace services; review actual workspace billing and keep total spend under the approved $40 ceiling. A single Render metrics sample on 2026-10-20 was 0.0087 MB; no production payments or customer use have been observed. The current illustrative base case (10 operators making 1,000 calls/month) yields $100 gross and about −$125 contribution after assumed acquisition, support, maintenance, payment fees, and hosting; modeled break-even is about 115 active operators. These inputs are speculative and are not evidence of demand or profitability.
+## Payments
 
-See [technical setup](agentrescue/README.md), [unit economics](venture/economics.md), [acceptance status](venture/acceptance.md), the [synthetic benchmark](venture/benchmark.json), and [GitHub Actions](https://github.com/elliot-hub-ui/agentrescue/actions) for details.
+The proposed price is $0.01 USDC per successful diagnosis when the service owner explicitly enables x402. Production payments are disabled. Never put wallet private keys or facilitator credentials in Render or this repository. Production activation requires an owner-provided receiving address, a selected HTTPS facilitator, and explicit review and approval of the live configuration.
+
+See [technical setup](agentrescue/README.md), [unit economics](venture/economics.md), [acceptance status](venture/acceptance.md), and the [synthetic benchmark](venture/benchmark.json).
