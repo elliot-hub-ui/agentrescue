@@ -31,9 +31,11 @@ class McpActivityTelemetryTests(unittest.TestCase):
             paid_trial_app._MCP_ACTIVITY_TOTAL = 0
 
         with mock.patch.object(paid_trial_app._mcp_activity_logger, "info") as log_info:
-            for _ in range(49):
-                paid_trial_app._record_mcp_activity({"method": "tools/list"})
+            for _ in range(9):
+                paid_trial_app._record_mcp_activity({"jsonrpc": "2.0", "method": "tools/list"})
+            paid_trial_app._record_mcp_activity({"method": "tools/list"})
             paid_trial_app._record_mcp_activity({
+                "jsonrpc": "2.0",
                 "method": "tools/call",
                 "params": {
                     "name": "diagnose_failure",
@@ -44,8 +46,8 @@ class McpActivityTelemetryTests(unittest.TestCase):
         self.assertEqual(log_info.call_count, 1)
         format_string, batch_size, counts = log_info.call_args.args
         rendered = format_string % (batch_size, counts)
-        self.assertIn("batch_size=50", rendered)
-        self.assertIn("tools_list=49", rendered)
+        self.assertIn("batch_size=10", rendered)
+        self.assertIn("tools_list=9", rendered)
         self.assertIn("diagnose_call_attempt=1", rendered)
         self.assertNotIn("PRIVATE_DIAGNOSTIC_SHOULD_NOT_BE_LOGGED", rendered)
 
