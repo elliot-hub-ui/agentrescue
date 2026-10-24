@@ -9,10 +9,11 @@ import asyncio
 import copy
 import contextlib
 import json
+import logging
 import os
 import re
 import time
-from collections import deque
+from collections import Counter, deque
 from threading import Lock
 from urllib.parse import urlparse
 
@@ -40,6 +41,57 @@ _posts: deque[float] = deque()
 _limit_lock = Lock()
 _configured = False
 _configure_lock = asyncio.Lock()
+
+# Bounded, aggregate-only MCP usage telemetry. It retains no request data or identifiers.
+_MCP_ACTIVITY_BATCH_SIZE = 50
+_MCP_ACTIVITY_METHODS = {
+    "initialize": "initialize",
+    "notifications/initialized": "initialized",
+    "ping": "ping",
+    "tools/list": "tools_list",
+    "resources/list": "resources_list",
+    "resources/read": "resources_read",
+    "prompts/list": "prompts_list",
+    "server/discover": "server_discover",
+}
+_MCP_ACTIVITY_COUNTS: Counter[str] = Counter()
+_MCP_ACTIVITY_TOTAL = 0
+_MCP_ACTIVITY_LOCK = Lock()
+_mcp_activity_logger = logging.getLogger("agentrescue.usage")
+
+
+def _record_mcp_activity(request_json) -> None:
+    """Log fixed-label MCP request counts every 50 requests, without payloads or IDs."""
+    global _MCP_ACTIVITY_TOTAL
+    if not isinstance(request_json, dict):
+        return
+    method = request_json.get("method")
+    if not isinstance(method, str):
+        return
+    if method == "tools/call":
+        params = request_json.get("params")
+        name = params.get("name") if isinstance(params, dict) else None
+        label = "diagnose_call_attempt" if name == "diagnose_failure" else "other_tools_call"
+    else:
+        label = _MCP_ACTIVITY_METHODS.get(method, "other")
+
+    summary = None
+    with _MCP_ACTIVITY_LOCK:
+        _MCP_ACTIVITY_COUNTS[label] += 1
+        _MCP_ACTIVITY_TOTAL += 1
+        if _MCP_ACTIVITY_TOTAL >= _MCP_ACTIVITY_BATCH_SIZE:
+            summary = ",".join(
+                f"{key}={_MCP_ACTIVITY_COUNTS[key]}"
+                for key in sorted(_MCP_ACTIVITY_COUNTS)
+            )
+            _MCP_ACTIVITY_COUNTS.clear()
+            _MCP_ACTIVITY_TOTAL = 0
+    if summary is not None:
+        _mcp_activity_logger.info(
+            "mcp_activity_summary batch_size=%d counts=%s",
+            _MCP_ACTIVITY_BATCH_SIZE,
+            summary,
+        )
 
 
 def payment_settings(env: dict[str, str] | None = None) -> dict[str, str] | None:
@@ -336,6 +388,7 @@ class McpPostRoute(Route):
             request_json = json.loads(request_body)
         except (TypeError, ValueError):
             request_json = None
+        _record_mcp_activity(request_json)
         if isinstance(request_json, dict) and request_json.get("method") == "server/discover":
             await self._discover(scope, headers, request_json, receive, send)
             return
