@@ -134,7 +134,7 @@ def _verify_signature(payload: bytes, signature: str, secret: str, now=None):
         if separator:
             parts.setdefault(key, []).append(value)
     timestamp = (parts.get("t") or [""])[0]
-    if not timestamp.isdecimal() or abs((int(time.time()) if now is None else now) - int(timestamp)) > 300:
+    if not timestamp.isdecimal() or len(timestamp) > 12 or abs((int(time.time()) if now is None else now) - int(timestamp)) > 300:
         return False
     expected = hmac.new(secret.encode(), timestamp.encode() + b"." + payload, hashlib.sha256).hexdigest()
     return any(hmac.compare_digest(expected, candidate) for candidate in parts.get("v1", []))
