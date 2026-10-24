@@ -112,14 +112,16 @@ async def checkout(request: Request):
         except Exception:
             connection.execute("DELETE FROM diagnosis_tokens WHERE token_hash = ?", (token_hash,))
             return JSONResponse({"error": "stripe_checkout_unavailable"}, status_code=502)
-        if not isinstance(session, dict) or not session.get("id") or not session.get("url"):
+        session_id = getattr(session, "id", None)
+        session_url = getattr(session, "url", None)
+        if not session_id or not session_url:
             connection.execute("DELETE FROM diagnosis_tokens WHERE token_hash = ?", (token_hash,))
             return JSONResponse({"error": "stripe_checkout_unavailable"}, status_code=502)
-        connection.execute("UPDATE diagnosis_tokens SET session_id = ? WHERE token_hash = ?", (session["id"], token_hash))
+        connection.execute("UPDATE diagnosis_tokens SET session_id = ? WHERE token_hash = ?", (session_id, token_hash))
     finally:
         connection.close()
     return JSONResponse({
-        "checkout_url": session["url"],
+        "checkout_url": session_url,
         "access_token": token,
         "price_usd": "1.00",
         "mode": "test",
