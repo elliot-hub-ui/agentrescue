@@ -25,6 +25,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Mount, Route
 
 from app import FEEDBACK_CATEGORIES, FEEDBACK_OUTCOMES, MAX_DIAGNOSIS_CHARS, SCHEMA, VERSION, diagnose
+from stripe_payments import cancel as stripe_cancel, checkout as stripe_checkout, paid_diagnose as stripe_paid_diagnose, success as stripe_success, webhook as stripe_webhook
 
 PRICE = "$0.01"
 PUBLIC_BASE_URL = "https://agentrescue-mcp.onrender.com"
@@ -773,6 +774,11 @@ app = Starlette(
         Route("/pricing", pricing, methods=["GET"]),
         Route("/", home, methods=["GET"]),
         Route("/v1/diagnose", diagnose_http, methods=["POST"]),
+        Route("/v1/stripe/checkout", stripe_checkout, methods=["POST"]),
+        Route("/v1/stripe/diagnose", stripe_paid_diagnose, methods=["POST"]),
+        Route("/v1/stripe/webhook", stripe_webhook, methods=["POST"]),
+        Route("/stripe/success", stripe_success, methods=["GET"]),
+        Route("/stripe/cancel", stripe_cancel, methods=["GET"]),
         Route("/v1/feedback", feedback, methods=["POST"]),
         McpPostRoute(mcp_app),
         Mount("/", app=mcp_app),
