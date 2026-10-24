@@ -10,6 +10,8 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from app import VERSION
+import paid_trial_app
+
 from paid_trial_app import (
     MAINNET,
     TESTNET,
@@ -20,6 +22,32 @@ from paid_trial_app import (
     payment_resource_config,
     payment_settings,
 )
+
+
+class McpActivityTelemetryTests(unittest.TestCase):
+    def test_logs_fixed_label_batches_without_request_payloads(self):
+        with paid_trial_app._MCP_ACTIVITY_LOCK:
+            paid_trial_app._MCP_ACTIVITY_COUNTS.clear()
+            paid_trial_app._MCP_ACTIVITY_TOTAL = 0
+
+        with mock.patch.object(paid_trial_app._mcp_activity_logger, "info") as log_info:
+            for _ in range(49):
+                paid_trial_app._record_mcp_activity({"method": "tools/list"})
+            paid_trial_app._record_mcp_activity({
+                "method": "tools/call",
+                "params": {
+                    "name": "diagnose_failure",
+                    "arguments": {"error": "PRIVATE_DIAGNOSTIC_SHOULD_NOT_BE_LOGGED"},
+                },
+            })
+
+        self.assertEqual(log_info.call_count, 1)
+        format_string, batch_size, counts = log_info.call_args.args
+        rendered = format_string % (batch_size, counts)
+        self.assertIn("batch_size=50", rendered)
+        self.assertIn("tools_list=49", rendered)
+        self.assertIn("diagnose_call_attempt=1", rendered)
+        self.assertNotIn("PRIVATE_DIAGNOSTIC_SHOULD_NOT_BE_LOGGED", rendered)
 
 
 class PaidTrialConfigTests(unittest.TestCase):
