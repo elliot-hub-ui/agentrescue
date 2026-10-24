@@ -53,7 +53,7 @@ class StripeSettingsTests(unittest.TestCase):
 class StripeCheckoutFlowTests(unittest.TestCase):
     def test_paid_webhook_unlocks_exactly_one_diagnosis(self):
         with tempfile.TemporaryDirectory() as folder:
-            fake_session = {"id": "cs_test_123", "url": "https://checkout.stripe.test/session"}
+            fake_session = types.SimpleNamespace(id="cs_test_123", url="https://checkout.stripe.test/session")
             create = mock.Mock(return_value=fake_session)
             fake_client = types.SimpleNamespace(
                 v1=types.SimpleNamespace(checkout=types.SimpleNamespace(sessions=types.SimpleNamespace(create=create)))
