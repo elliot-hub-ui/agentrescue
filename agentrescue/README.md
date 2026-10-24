@@ -27,3 +27,12 @@ The production payment switch remains off until the owner supplies the receiving
 The included `x402_mcp_test_once.py` is an isolated one-attempt test client. Do not clear its sentinel or repeat a testnet payment without separate explicit authorization.
 
 The live MCP Registry listing is [AgentRescue 0.2.0](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.elliot-hub-ui%2Fagentrescue/versions/latest); the unapproved local candidate is version 0.2.1. Its rules pass 32 synthetic benchmark cases, which is not real-world validation. Confidence remains qualitative and uncalibrated. Render's recent request counts include launch checks and other probes, so they do not verify independent customer use. This is a pilot, not a validated or profitable product.
+
+
+## Stripe sandbox test
+
+Stripe has a separate, optional **test-mode-only** Checkout path. It does not change the free HTTP or MCP routes or enable live payments. A successful signed Stripe webhook unlocks one diagnosis for the one-use bearer token returned by checkout; the browser success redirect alone never grants access. The test price is fixed at $1.00 USD and is not a proposed live price. Stripe card fees make one-cent card charges uneconomic.
+
+To run the flow on a private/test deployment, set `AGENTRESCUE_STRIPE_ENABLED=1`, `STRIPE_SECRET_KEY` to a restricted **test** key (`rk_test_...` preferred; `sk_test_...` also accepted), `STRIPE_WEBHOOK_SECRET` to the test endpoint's signing secret, `AGENTRESCUE_PUBLIC_URL` to the deployment's HTTPS origin, and `AGENTRESCUE_STRIPE_DB` to a writable SQLite path. Configure the Stripe test webhook at `/v1/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`. The endpoint rejects live keys and only accepts signed, paid, $1 USD test sessions. Leave `AGENTRESCUE_STRIPE_ENABLED` unset on production.
+
+Create a test checkout with `POST /v1/stripe/checkout`, open the returned `checkout_url` with a Stripe test card, and then send one sanitized diagnosis to `POST /v1/stripe/diagnose` using `Authorization: Bearer <access_token>`. The token is returned only once; save it before leaving the checkout flow. The included store is single-instance SQLite for sandbox testing only. It is ephemeral on many hosts and is not suitable for production or horizontal scaling; a durable database and a separate reviewed production integration are required before any live payment collection.
