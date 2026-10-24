@@ -237,6 +237,7 @@ class PaidTrialConfigTests(unittest.TestCase):
         self.assertIn("## When to use", guide)
         self.assertIn("https://agentrescue-mcp.onrender.com/developers", guide)
         self.assertIn("https://agentrescue-mcp.onrender.com/pricing", guide)
+        self.assertIn("diagnostic text is not included", guide)
         self.assertIn("href='/developers'", homepage)
         self.assertIn("href='/pricing'", homepage)
         self.assertIn("https://agentrescue-mcp.onrender.com/mcp", homepage)
@@ -244,6 +245,7 @@ class PaidTrialConfigTests(unittest.TestCase):
         self.assertEqual(json.loads(jsonld)["@type"], "SoftwareApplication")
         self.assertIn("/v1/diagnose", developer_page.text)
         self.assertIn("diagnose_failure", developer_page.text)
+        self.assertIn("not diagnostic text", developer_page.text)
         self.assertEqual(developer_page.status_code, 200)
         self.assertIn("Diagnosis is free today", pricing_page.text)
         self.assertIn("$0.01 USDC", pricing_page.text)
@@ -354,10 +356,12 @@ class PaidTrialConfigTests(unittest.TestCase):
                 self.assertIn("resources", initialize_result["capabilities"])
                 self.assertIn("latest request", initialize_result["instructions"])
                 request_headers = {**headers, "MCP-Protocol-Version": negotiated}
-                listed = client.post("/mcp", headers=request_headers, json={
-                    "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
-                })
+                with mock.patch("paid_trial_app.usage_logger.info") as usage_log:
+                    listed = client.post("/mcp", headers=request_headers, json={
+                        "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
+                    })
                 self.assertEqual(listed.status_code, 200, listed.text)
+                usage_log.assert_not_called()
                 self.assertEqual(listed.json()["result"]["tools"][0]["name"], "diagnose_failure")
                 tool_description = listed.json()["result"]["tools"][0]["description"]
                 self.assertIn("latest request", tool_description)
@@ -375,21 +379,40 @@ class PaidTrialConfigTests(unittest.TestCase):
                 guide_text = resource.json()["result"]["contents"][0]["text"]
                 self.assertIn("Never send credentials or personal data", guide_text)
                 self.assertIn("High-risk advice requires human approval", guide_text)
-                called = client.post("/mcp", headers=request_headers, json={
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "diagnose_failure",
-                        "arguments": {"error": "HTTP 429 rate limit", "system": "http"},
-                    },
-                })
+                self.assertIn("diagnostic text is not included", guide_text)
+                privacy_marker = "SYNTHETIC_DO_NOT_LOG_82731"
+                with self.assertLogs("agentrescue.usage", level="INFO") as usage_events:
+                    called = client.post("/mcp", headers=request_headers, json={
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "diagnose_failure",
+                            "arguments": {"error": f"HTTP 429 rate limit {privacy_marker}", "system": "http"},
+                        },
+                    })
                 self.assertEqual(called.status_code, 200, called.text)
+                self.assertEqual(len(usage_events.output), 1)
+                self.assertIn("event=diagnosis_tool_call response_status=200 payment_mode=disabled", usage_events.output[0])
+                self.assertNotIn(privacy_marker, usage_events.output[0])
                 result = called.json()["result"]
                 self.assertFalse(result.get("isError", False))
                 diagnosis = json.loads(result["content"][0]["text"])
                 self.assertEqual(diagnosis["category"], "rate_limit")
                 self.assertEqual(diagnosis["payment"]["mode"], "disabled")
+                with self.assertLogs("agentrescue.usage", level="INFO") as failed_usage:
+                    failed_call = client.post("/mcp", headers=request_headers, json={
+                        "jsonrpc": "2.0",
+                        "id": 6,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "diagnose_failure",
+                            "arguments": {"error": "", "system": "http"},
+                        },
+                    })
+                self.assertEqual(failed_call.status_code, 200, failed_call.text)
+                self.assertEqual(len(failed_usage.output), 1)
+                self.assertIn("event=diagnosis_tool_call response_status=200 payment_mode=disabled", failed_usage.output[0])
                 rejected = client.get("/mcp", headers={"Host": "attacker.example"})
                 self.assertEqual(rejected.status_code, 421)
 
