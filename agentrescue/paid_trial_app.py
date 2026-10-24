@@ -61,7 +61,7 @@ _mcp_activity_logger = logging.getLogger("agentrescue.usage")
 
 
 def _record_mcp_activity(request_json) -> None:
-    """Log fixed-label counts every 10 JSON-RPC 2.0 requests, without payloads or IDs."""
+    """Log fixed-label counts every 10 JSON-RPC 2.0 messages, without payloads or IDs."""
     global _MCP_ACTIVITY_TOTAL
     if not isinstance(request_json, dict) or request_json.get("jsonrpc") != "2.0":
         return
