@@ -13,6 +13,9 @@ import os
 import re
 import time
 from collections import deque
+from typing import Annotated, Literal
+
+from pydantic import Field
 from threading import Lock
 from urllib.parse import urlparse
 
@@ -528,7 +531,29 @@ async def _configure_tool() -> None:
         else:
             description += " No charge; the x402 paid trial is disabled."
 
-        async def diagnose_failure(error: str, system: str = "mcp") -> str:
+        async def diagnose_failure(
+            error: Annotated[
+                str,
+                Field(
+                    description=(
+                        "The shortest sanitized error message or excerpt from the latest failed request. "
+                        "Do not send full logs, credentials, personal data, or request bodies."
+                    ),
+                    min_length=1,
+                    max_length=MAX_DIAGNOSIS_CHARS,
+                ),
+            ],
+            system: Annotated[
+                Literal["http", "api", "mcp"],
+                Field(
+                    description=(
+                        "The source system: http for HTTP transport, api for an API response, "
+                        "or mcp for MCP protocol and tool-call failures."
+                    )
+                ),
+            ] = "mcp",
+        ) -> str:
+            """Give read-only recovery guidance for a recent, sanitized failure."""
             if not isinstance(error, str) or not error.strip() or len(error) > MAX_DIAGNOSIS_CHARS:
                 raise ValueError(f"error must contain 1–{MAX_DIAGNOSIS_CHARS} characters")
             result = diagnose(error, system)
