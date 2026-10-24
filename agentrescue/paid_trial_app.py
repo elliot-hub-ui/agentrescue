@@ -9,6 +9,7 @@ import asyncio
 import copy
 import contextlib
 import json
+import logging
 import os
 import re
 import time
@@ -40,6 +41,7 @@ _posts: deque[float] = deque()
 _limit_lock = Lock()
 _configured = False
 _configure_lock = asyncio.Lock()
+usage_logger = logging.getLogger("agentrescue.usage")
 
 
 def payment_settings(env: dict[str, str] | None = None) -> dict[str, str] | None:
@@ -340,6 +342,21 @@ class McpPostRoute(Route):
             await self._discover(scope, headers, request_json, receive, send)
             return
 
+        params = request_json.get("params") if isinstance(request_json, dict) else None
+        track_diagnosis = (
+            isinstance(request_json, dict)
+            and request_json.get("method") == "tools/call"
+            and isinstance(params, dict)
+            and params.get("name") == "diagnose_failure"
+        )
+        response_status = None
+
+        async def observe_send(message):
+            nonlocal response_status
+            if message["type"] == "http.response.start":
+                response_status = message["status"]
+            await send(message)
+
         replayed = False
 
         async def replay_receive():
@@ -349,7 +366,19 @@ class McpPostRoute(Route):
                 return {"type": "http.request", "body": request_body, "more_body": False}
             return await receive()
 
-        await self.mcp_app(scope, replay_receive, send)
+        if not track_diagnosis:
+            await self.mcp_app(scope, replay_receive, send)
+            return
+
+        await self.mcp_app(scope, replay_receive, observe_send)
+        settings = payment_settings()
+        payment_mode = settings["mode"] if settings else "disabled"
+        # Intentionally log only aggregate-friendly labels, never request IDs or input data.
+        usage_logger.info(
+            "event=diagnosis_tool_call response_status=%s payment_mode=%s",
+            response_status or "unknown",
+            payment_mode,
+        )
 
     async def _discover(self, scope, headers, request_json, receive, send):
         request_id = request_json.get("id")
@@ -480,7 +509,9 @@ def diagnosis_guide() -> str:
         "current before acting. High-risk advice requires human approval; fixes never execute "
         "automatically.\n\n"
         "Send only synthetic or sanitized diagnostic text. Never send credentials or personal "
-        "data. The service currently charges nothing; payment collection is disabled.\n"
+        "data. The service currently charges nothing; payment collection is disabled.\n\n"
+        "Usage measurement records only the diagnosis-call response status and payment mode; "
+        "diagnostic text is not included. Hosting request logs may retain client metadata.\n"
     )
 
 
@@ -562,6 +593,7 @@ async def llms(request: Request):
         "Call diagnose_failure with a sanitized HTTP, API, or MCP error. Advice is read-only.\n"
         f"{price}\n"
         "Requests are limited to 60 GET and 20 POST per minute per instance; request and response bodies are capped at 16 KB.\n"
+        "Usage measurement logs only the diagnosis-call response status and payment mode; diagnostic text is not included.\n"
         "Do not send secrets or personal data.\n"
     )
     return PlainTextResponse(content)
@@ -626,6 +658,7 @@ async def developers(request: Request):
         "<h2>MCP</h2><p>Connect with Streamable HTTP and call <code>diagnose_failure</code> after listing tools. Read <code>agentrescue://guide/diagnosis</code> for use and safety guidance.</p>"
         f"<pre>{{\"mcpServers\":{{\"agentrescue\":{{\"url\":\"{PUBLIC_BASE_URL}/mcp\"}}}}}}</pre>"
         "<h2>Response behavior</h2><p>Responses identify a category, evidence signals, qualitative confidence and recovery guidance. Confidence is not a calibrated probability. High-risk guidance requires human review. Never send credentials or personal data.</p>"
+        "<p>Usage logs record only the diagnosis-call response status and payment mode, not diagnostic text. Render's platform request logs may retain client metadata separately.</p>"
         "<p><a href='/openapi.json'>OpenAPI</a> · <a href='/llms.txt'>Agent guide</a> · <a href='/pricing'>Pricing</a></p></main></html>"
     )
     return HTMLResponse(html)
