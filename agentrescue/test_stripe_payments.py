@@ -46,7 +46,8 @@ class StripeSettingsTests(unittest.TestCase):
         self.assertTrue(_verify_signature(payload, f"t={timestamp},v1={digest}", secret))
         self.assertFalse(_verify_signature(payload, f"t={timestamp},v1={digest}", "wrong-secret"))
         self.assertFalse(_verify_signature(payload, f"t=1,v1={digest}", secret))
-        self.assertFalse(_verify_signature(payload, f"t={"9" * 5000},v1={digest}", secret))
+        oversized_timestamp = "9" * 5000
+        self.assertFalse(_verify_signature(payload, f"t={oversized_timestamp},v1={digest}", secret))
 
 
 class StripeCheckoutFlowTests(unittest.TestCase):
