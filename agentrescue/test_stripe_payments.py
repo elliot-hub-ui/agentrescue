@@ -67,46 +67,47 @@ class StripeCheckoutFlowTests(unittest.TestCase):
                 "AGENTRESCUE_X402_ENABLED": "0",
             }
             with mock.patch.dict(os.environ, env, clear=True), mock.patch.dict(sys.modules, {"stripe": stripe_module}):
-                with TestClient(app) as client:
-                    created = client.post("/v1/stripe/checkout")
-                    self.assertEqual(created.status_code, 201, created.text)
-                    result = created.json()
-                    self.assertEqual(result["mode"], "test")
-                    self.assertEqual(result["price_usd"], "1.00")
-                    self.assertEqual(create.call_args.kwargs["params"]["line_items"][0]["price_data"]["unit_amount"], PRICE_CENTS)
-                    token = result["access_token"]
-                    body = {"error": "HTTP 429 rate limit", "system": "http"}
-                    waiting = client.post("/v1/stripe/diagnose", json=body, headers={"Authorization": f"Bearer {token}"})
-                    self.assertEqual(waiting.status_code, 402)
+                client = TestClient(app)
+                created = client.post("/v1/stripe/checkout")
+                self.assertEqual(created.status_code, 201, created.text)
+                result = created.json()
+                self.assertEqual(result["mode"], "test")
+                self.assertEqual(result["price_usd"], "1.00")
+                self.assertEqual(create.call_args.kwargs["params"]["line_items"][0]["price_data"]["unit_amount"], PRICE_CENTS)
+                token = result["access_token"]
+                body = {"error": "HTTP 429 rate limit", "system": "http"}
+                waiting = client.post("/v1/stripe/diagnose", json=body, headers={"Authorization": f"Bearer {token}"})
+                self.assertEqual(waiting.status_code, 402)
 
-                    checkout_token_hash = create.call_args.kwargs["params"]["metadata"]["agentrescue_token_hash"]
-                    event = {
-                        "id": "evt_test_paid",
-                        "type": "checkout.session.completed",
-                        "data": {"object": {
-                            "id": "cs_test_123",
-                            "livemode": False,
-                            "mode": "payment",
-                            "payment_status": "paid",
-                            "currency": "usd",
-                            "amount_total": PRICE_CENTS,
-                            "metadata": {"agentrescue_token_hash": checkout_token_hash},
-                        }},
-                    }
-                    payload = json.dumps(event, separators=(",", ":")).encode()
-                    timestamp = str(int(time.time()))
-                    digest = hmac.new(b"whsec_example", timestamp.encode() + b"." + payload, hashlib.sha256).hexdigest()
-                    headers = {"Stripe-Signature": f"t={timestamp},v1={digest}"}
-                    paid = client.post("/v1/stripe/webhook", content=payload, headers=headers)
-                    self.assertEqual(paid.status_code, 200, paid.text)
-                    duplicate = client.post("/v1/stripe/webhook", content=payload, headers=headers)
-                    self.assertTrue(duplicate.json()["duplicate"])
+                checkout_token_hash = create.call_args.kwargs["params"]["metadata"]["agentrescue_token_hash"]
+                event = {
+                    "id": "evt_test_paid",
+                    "type": "checkout.session.completed",
+                    "data": {"object": {
+                        "id": "cs_test_123",
+                        "livemode": False,
+                        "mode": "payment",
+                        "payment_status": "paid",
+                        "currency": "usd",
+                        "amount_total": PRICE_CENTS,
+                        "metadata": {"agentrescue_token_hash": checkout_token_hash},
+                    }},
+                }
+                payload = json.dumps(event, separators=(",", ":")).encode()
+                timestamp = str(int(time.time()))
+                digest = hmac.new(b"whsec_example", timestamp.encode() + b"." + payload, hashlib.sha256).hexdigest()
+                headers = {"Stripe-Signature": f"t={timestamp},v1={digest}"}
+                paid = client.post("/v1/stripe/webhook", content=payload, headers=headers)
+                self.assertEqual(paid.status_code, 200, paid.text)
+                duplicate = client.post("/v1/stripe/webhook", content=payload, headers=headers)
+                self.assertTrue(duplicate.json()["duplicate"])
 
-                    diagnosed = client.post("/v1/stripe/diagnose", json=body, headers={"Authorization": f"Bearer {token}"})
-                    self.assertEqual(diagnosed.status_code, 200, diagnosed.text)
-                    self.assertEqual(diagnosed.json()["category"], "rate_limit")
-                    used = client.post("/v1/stripe/diagnose", json=body, headers={"Authorization": f"Bearer {token}"})
-                    self.assertEqual(used.status_code, 402)
+                diagnosed = client.post("/v1/stripe/diagnose", json=body, headers={"Authorization": f"Bearer {token}"})
+                self.assertEqual(diagnosed.status_code, 200, diagnosed.text)
+                self.assertEqual(diagnosed.json()["category"], "rate_limit")
+                used = client.post("/v1/stripe/diagnose", json=body, headers={"Authorization": f"Bearer {token}"})
+                self.assertEqual(used.status_code, 402)
+                client.close()
 
     def test_invalid_webhook_signature_cannot_activate_credit(self):
         with tempfile.TemporaryDirectory() as folder:
