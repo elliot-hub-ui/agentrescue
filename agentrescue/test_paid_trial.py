@@ -362,6 +362,14 @@ class PaidTrialConfigTests(unittest.TestCase):
                 tool_description = listed.json()["result"]["tools"][0]["description"]
                 self.assertIn("latest request", tool_description)
                 self.assertIn("never executes fixes", tool_description)
+                input_schema = listed.json()["result"]["tools"][0]["inputSchema"]
+                error_schema = input_schema["properties"]["error"]
+                system_schema = input_schema["properties"]["system"]
+                self.assertIn("shortest sanitized error", error_schema["description"])
+                self.assertEqual(error_schema["minLength"], 1)
+                self.assertEqual(error_schema["maxLength"], 8000)
+                self.assertEqual(system_schema["enum"], ["http", "api", "mcp"])
+                self.assertIn("source system", system_schema["description"])
                 resources = client.post("/mcp", headers=request_headers, json={
                     "jsonrpc": "2.0", "id": 4, "method": "resources/list", "params": {},
                 })
