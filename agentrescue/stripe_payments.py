@@ -75,7 +75,6 @@ def _create_checkout(settings, token_hash):
     suffix = "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(8))
     session = client.v1.checkout.sessions.create(params={
         "mode": "payment",
-        "ui_mode": "hosted_page",
         "line_items": [{
             "price_data": {
                 "currency": "usd",
