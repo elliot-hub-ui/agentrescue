@@ -1,5 +1,6 @@
 mcp==1.30.0
 fastapi==0.140.13
 x402[evm]==2.25.0
+stripe==15.6.0
 # A released universal wheel is available for this runtime; avoids source builds.
 cryptography==46.0.3
