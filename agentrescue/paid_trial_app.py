@@ -43,7 +43,7 @@ _configured = False
 _configure_lock = asyncio.Lock()
 
 # Bounded, aggregate-only MCP usage telemetry. It retains no request data or identifiers.
-_MCP_ACTIVITY_BATCH_SIZE = 50
+_MCP_ACTIVITY_BATCH_SIZE = 10
 _MCP_ACTIVITY_METHODS = {
     "initialize": "initialize",
     "notifications/initialized": "initialized",
@@ -63,7 +63,7 @@ _mcp_activity_logger = logging.getLogger("agentrescue.usage")
 def _record_mcp_activity(request_json) -> None:
     """Log fixed-label MCP request counts every 50 requests, without payloads or IDs."""
     global _MCP_ACTIVITY_TOTAL
-    if not isinstance(request_json, dict):
+    if not isinstance(request_json, dict) or request_json.get("jsonrpc") != "2.0":
         return
     method = request_json.get("method")
     if not isinstance(method, str):
