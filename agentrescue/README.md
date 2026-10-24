@@ -14,6 +14,8 @@ Requires Python 3.12+. Start the free prototype with `python3 app.py`, then visi
 
 The live Render service runs `paid_trial_app.py` on a single 0.5 CPU / 512 MB instance. HTTP and MCP diagnosis currently cost nothing because x402 is disabled; feedback collection is also off. The service has no account system, durable feedback store, production billing, or production support guarantee. Send sanitized excerpts only. Pattern-based redaction can miss credentials.
 
+For product measurement, the app writes one `diagnosis_tool_call` runtime-log event when `diagnose_failure` is invoked through MCP. The event contains only the HTTP response status and whether x402 is disabled, testnet, or mainnet; it never includes the request body, error text, request ID, IP address, or user-agent. These are call counts, not unique agents or proof of payment. Render's platform request logs may retain client metadata separately.
+
 ## Verify
 
 Run the test suite with `python3 -m unittest`. To run all test and x402 adapter checks, install pinned dependencies: `python3 -m venv .venv`, `.venv/bin/pip install -r requirements.txt`, then `.venv/bin/pip install -r requirements.lock`. The main prototype itself uses only the Python standard library.
