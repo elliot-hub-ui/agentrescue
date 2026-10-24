@@ -119,7 +119,8 @@ class StripeCheckoutFlowTests(unittest.TestCase):
                 "AGENTRESCUE_X402_ENABLED": "0",
             }
             now = str(int(time.time()))
-            with mock.patch.dict(os.environ, env, clear=True), TestClient(app) as client:
+            with mock.patch.dict(os.environ, env, clear=True):
+                client = TestClient(app)
                 response = client.post(
                     "/v1/stripe/webhook",
                     content=b'{"id":"evt_bad"}',
@@ -127,6 +128,7 @@ class StripeCheckoutFlowTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(response.json()["error"], "invalid_signature")
+                client.close()
 
 
 if __name__ == "__main__":
