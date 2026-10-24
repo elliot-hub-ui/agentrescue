@@ -438,5 +438,33 @@ class PaidTrialConfigTests(unittest.TestCase):
             self.assertNotIn("sk_live_do_not_store_12345678", json.dumps(stored))
 
 
+
+class RequestLimitTests(unittest.TestCase):
+    def test_unknown_gets_cannot_exhaust_known_agent_surfaces(self):
+        from paid_trial_app import _allow, _gets, _other_gets, _posts, _limit_lock
+
+        with _limit_lock:
+            _gets.clear()
+            _other_gets.clear()
+            _posts.clear()
+        try:
+            with (
+                mock.patch("paid_trial_app.MAX_GETS", 2),
+                mock.patch("paid_trial_app.MAX_OTHER_GETS", 1),
+                mock.patch("paid_trial_app.time.monotonic", return_value=100.0),
+            ):
+                self.assertTrue(_allow("GET", "/unrecognized/path"))
+                self.assertFalse(_allow("GET", "/another/unrecognized/path"))
+                self.assertTrue(_allow("GET", "/"))
+                self.assertTrue(_allow("GET", "/pricing/"))
+                self.assertFalse(_allow("GET", "/developers"))
+                self.assertTrue(_allow("POST", "/mcp"))
+        finally:
+            with _limit_lock:
+                _gets.clear()
+                _other_gets.clear()
+                _posts.clear()
+
+
 if __name__ == "__main__":
     unittest.main()

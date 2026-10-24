@@ -34,8 +34,15 @@ MAX_REQUEST_BYTES = 16_000
 MAX_RESPONSE_BYTES = 16_000
 WINDOW_SECONDS = 60
 MAX_GETS = 60
+MAX_OTHER_GETS = 10
 MAX_POSTS = 20
+KNOWN_GET_PATHS = frozenset({
+    "/", "/health", "/llms.txt", "/robots.txt", "/sitemap.xml",
+    "/openapi.json", "/developers", "/pricing", "/v1/diagnose",
+    "/v1/feedback", "/mcp",
+})
 _gets: deque[float] = deque()
+_other_gets: deque[float] = deque()
 _posts: deque[float] = deque()
 _limit_lock = Lock()
 _configured = False
@@ -214,10 +221,16 @@ def payment_discovery_extension():
     )
 
 
-def _allow(method: str) -> bool:
+def _allow(method: str, path: str = "") -> bool:
     now = time.monotonic()
-    queue = _gets if method == "GET" else _posts
-    maximum = MAX_GETS if method == "GET" else MAX_POSTS
+    if method == "GET":
+        normalized_path = path.rstrip("/") or "/"
+        known_surface = normalized_path in KNOWN_GET_PATHS
+        queue = _gets if known_surface else _other_gets
+        maximum = MAX_GETS if known_surface else MAX_OTHER_GETS
+    else:
+        queue = _posts
+        maximum = MAX_POSTS
     with _limit_lock:
         while queue and queue[0] <= now - WINDOW_SECONDS:
             queue.popleft()
@@ -237,7 +250,7 @@ class McpTrafficBounds:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         method = scope.get("method", "")
-        if method in {"GET", "POST", "DELETE"} and not _allow(method):
+        if method in {"GET", "POST", "DELETE"} and not _allow(method, scope.get("path", "")):
             response = JSONResponse({"error": "rate_limit", "retry_after_seconds": WINDOW_SECONDS}, status_code=429)
             return await response(scope, receive, send)
         headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])}
